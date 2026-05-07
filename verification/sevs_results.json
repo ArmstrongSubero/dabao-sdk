@@ -1,0 +1,140 @@
+{
+  "files": [
+    {
+      "file": "adc.c",
+      "jpl": 0,
+      "doc_hard": 0,
+      "doc_advisory": 0,
+      "clang_tidy": 0,
+      "cppcheck": 0
+    },
+    {
+      "file": "aes.c",
+      "jpl": 0,
+      "doc_hard": 0,
+      "doc_advisory": 0,
+      "clang_tidy": 8,
+      "cppcheck": 0
+    },
+    {
+      "file": "bio.c",
+      "jpl": 0,
+      "doc_hard": 0,
+      "doc_advisory": 2,
+      "clang_tidy": 33,
+      "cppcheck": 0
+    },
+    {
+      "file": "bio_dma.c",
+      "jpl": 0,
+      "doc_hard": 0,
+      "doc_advisory": 0,
+      "clang_tidy": 7,
+      "cppcheck": 0
+    },
+    {
+      "file": "gpio.c",
+      "jpl": 0,
+      "doc_hard": 0,
+      "doc_advisory": 0,
+      "clang_tidy": 7,
+      "cppcheck": 0
+    },
+    {
+      "file": "i2c.c",
+      "jpl": 0,
+      "doc_hard": 0,
+      "doc_advisory": 1,
+      "clang_tidy": 19,
+      "cppcheck": 0
+    },
+    {
+      "file": "irq.c",
+      "jpl": 0,
+      "doc_hard": 0,
+      "doc_advisory": 3,
+      "clang_tidy": 14,
+      "cppcheck": 0
+    },
+    {
+      "file": "pwm.c",
+      "jpl": 0,
+      "doc_hard": 0,
+      "doc_advisory": 2,
+      "clang_tidy": 10,
+      "cppcheck": 5
+    },
+    {
+      "file": "qspi.c",
+      "jpl": 0,
+      "doc_hard": 0,
+      "doc_advisory": 4,
+      "clang_tidy": 13,
+      "cppcheck": 0
+    },
+    {
+      "file": "rram.c",
+      "jpl": 0,
+      "doc_hard": 0,
+      "doc_advisory": 3,
+      "clang_tidy": 19,
+      "cppcheck": 0
+    },
+    {
+      "file": "rtc.c",
+      "jpl": 0,
+      "doc_hard": 0,
+      "doc_advisory": 0,
+      "clang_tidy": 0,
+      "cppcheck": 0
+    },
+    {
+      "file": "sha.c",
+      "jpl": 0,
+      "doc_hard": 0,
+      "doc_advisory": 0,
+      "clang_tidy": 8,
+      "cppcheck": 0
+    },
+    {
+      "file": "spi.c",
+      "jpl": 0,
+      "doc_hard": 0,
+      "doc_advisory": 1,
+      "clang_tidy": 17,
+      "cppcheck": 0
+    },
+    {
+      "file": "trng.c",
+      "jpl": 0,
+      "doc_hard": 0,
+      "doc_advisory": 0,
+      "clang_tidy": 1,
+      "cppcheck": 0
+    },
+    {
+      "file": "uart.c",
+      "jpl": 0,
+      "doc_hard": 0,
+      "doc_advisory": 2,
+      "clang_tidy": 9,
+      "cppcheck": 0
+    },
+    {
+      "file": "w25q.c",
+      "jpl": 0,
+      "doc_hard": 0,
+      "doc_advisory": 6,
+      "clang_tidy": 24,
+      "cppcheck": 0
+    },
+    {
+      "file": "wdt.c",
+      "jpl": 0,
+      "doc_hard": 0,
+      "doc_advisory": 0,
+      "clang_tidy": 0,
+      "cppcheck": 0
+    }
+  ]
+}

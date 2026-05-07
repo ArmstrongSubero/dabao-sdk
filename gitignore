@@ -1,0 +1,14 @@
+build/
+verification/
+*.o
+*.elf
+*.bin
+*.uf2
+*.map
+*.pyc
+__pycache__/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~

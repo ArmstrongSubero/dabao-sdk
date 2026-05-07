@@ -1,0 +1,59 @@
+/*
+ * Copyright (c) 2026 Armstrong Subero
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Dabao evaluation board defaults.
+ */
+
+#ifndef _BOARDS_DABAO_H
+#define _BOARDS_DABAO_H
+
+/* UART2 is the console (PB13=RX, PB14=TX) */
+#define BAO_DEFAULT_UART            2
+#define BAO_DEFAULT_UART_TX_PORT    GPIO_PORT_B
+#define BAO_DEFAULT_UART_TX_PIN     14
+#define BAO_DEFAULT_UART_RX_PORT    GPIO_PORT_B
+#define BAO_DEFAULT_UART_RX_PIN     13
+#define BAO_DEFAULT_UART_BAUD_RATE  115200
+
+/* I2C0 (PB11=SCL, PB12=SDA) */
+#define BAO_DEFAULT_I2C_SCL_PORT    GPIO_PORT_B
+#define BAO_DEFAULT_I2C_SCL_PIN     11
+#define BAO_DEFAULT_I2C_SDA_PORT    GPIO_PORT_B
+#define BAO_DEFAULT_I2C_SDA_PIN     12
+
+/* SPI2 (PC0=CLK, PC1=MOSI, PC2=MISO, PC3=CS) */
+#define BAO_DEFAULT_SPI_CLK_PORT    GPIO_PORT_C
+#define BAO_DEFAULT_SPI_CLK_PIN     0
+#define BAO_DEFAULT_SPI_MOSI_PORT   GPIO_PORT_C
+#define BAO_DEFAULT_SPI_MOSI_PIN    1
+#define BAO_DEFAULT_SPI_MISO_PORT   GPIO_PORT_C
+#define BAO_DEFAULT_SPI_MISO_PIN    2
+#define BAO_DEFAULT_SPI_CS_PORT     GPIO_PORT_C
+#define BAO_DEFAULT_SPI_CS_PIN      3
+
+/* QSPI1 (PC11=CLK, PC7=D0, PC8=D1, PC9=D2, PC10=D3, PC12=CS0, PC13=CS1) */
+#define BAO_DEFAULT_QSPI_INSTANCE   1
+#define BAO_DEFAULT_QSPI_CLK_PORT   GPIO_PORT_C
+#define BAO_DEFAULT_QSPI_CLK_PIN    11
+#define BAO_DEFAULT_QSPI_D0_PORT    GPIO_PORT_C
+#define BAO_DEFAULT_QSPI_D0_PIN     7
+#define BAO_DEFAULT_QSPI_D1_PORT    GPIO_PORT_C
+#define BAO_DEFAULT_QSPI_D1_PIN     8
+#define BAO_DEFAULT_QSPI_D2_PORT    GPIO_PORT_C
+#define BAO_DEFAULT_QSPI_D2_PIN     9
+#define BAO_DEFAULT_QSPI_D3_PORT    GPIO_PORT_C
+#define BAO_DEFAULT_QSPI_D3_PIN     10
+#define BAO_DEFAULT_QSPI_CS0_PORT   GPIO_PORT_C
+#define BAO_DEFAULT_QSPI_CS0_PIN    12
+#define BAO_DEFAULT_QSPI_CS1_PORT   GPIO_PORT_C
+#define BAO_DEFAULT_QSPI_CS1_PIN    13
+
+/* No onboard LED. Common choice: PB1 (header pin 29) */
+/* #define BAO_DEFAULT_LED_PORT     GPIO_PORT_B */
+/* #define BAO_DEFAULT_LED_PIN      1           */
+
+/* Crystal */
+#define BAO_XOSC_MHZ                48
+
+#endif
