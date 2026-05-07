@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * TRNG driver for the Baochip-1x SCE (Secure Crypto Engine).
- * Extracted from working main_trng.c, verified on Dabao hardware.
  */
 
 #include "hardware/trng.h"
@@ -88,7 +87,6 @@ int trng_generate(uint32_t *buf, uint32_t word_count)
 uint32_t trng_random(void)
 {
     uint32_t val = 0;
-    SEVS_ASSERT(sizeof(val) == 4);
     SEVS_INVARIANT(TRNG_MAX_WORDS >= 1);
     trng_generate(&val, 1);
     return val;

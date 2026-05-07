@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * PWM driver for the Baochip-1x.
- * Extracted from working main_pwm1.c, verified on Dabao hardware.
  */
 
 #include "hardware/pwm.h"
@@ -15,7 +14,6 @@
 /* Per-slice state: period (counter top value) */
 static uint16_t slice_period[4];
 
-/* Register access for a given slice */
 static inline volatile uint32_t *pwm_reg(uint slice, uint offset)
 {
     return (volatile uint32_t *)(PWM_BASE + PWM_SLICE_OFFSET(slice) + offset);

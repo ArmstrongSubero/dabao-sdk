@@ -20,18 +20,15 @@
 #include "hardware/regs/pmu.h"
 #include "sevs_runtime.h"
 
-/* RRC command values */
 #define RRC_LOAD_BUFFER     0x5200
 #define RRC_WRITE_BUFFER    0x9528
 #define RRC_CR_NORMAL       0x0
 #define RRC_CR_WRITE_CMD    0x2
 
-/* Number of retry attempts for failed writes */
 #define RRAM_WRITE_RETRIES  2
 
 static void cache_flush(void)
 {
-    SEVS_ASSERT(sizeof(uint32_t) == 4);
     __asm__ volatile (
         "fence.i\n"
         ".word 0x500F\n"

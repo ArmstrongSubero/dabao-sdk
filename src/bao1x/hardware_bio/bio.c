@@ -14,21 +14,11 @@
 
 #include "hardware/bio.h"
 #include "sevs_runtime.h"
-
-/* ========================================================================== */
-/*                     Module State                                            */
-/* ========================================================================== */
-
 /*
  * We store fclk so bio_set_target_freq() can compute dividers.
  * This is the only piece of "state" in the driver.
  */
 static uint32_t s_fclk_hz = 0;
-
-/* ========================================================================== */
-/*                     Initialization                                          */
-/* ========================================================================== */
-
 /** @brief Initialize the BIO coprocessor: halt all cores, fill IMEM, drain FIFOs.
  *  @param[in] fclk_hz Core clock frequency in Hz (used for divider calculations).
  *  @return 0 on success, -1 if IMEM or CFGINFO verification fails.
@@ -179,11 +169,6 @@ int bio_init(uint32_t fclk_hz)
 
     return 0;
 }
-
-/* ========================================================================== */
-/*                     Code Loading                                            */
-/* ========================================================================== */
-
 /** @brief Load a byte-oriented program into a BIO core instruction memory.
  *  @param[in] core Core index (0-3).
  *  @param[in] code Program bytes (little-endian).
@@ -269,11 +254,6 @@ int bio_load_code_words(uint32_t core, const uint32_t *words, uint32_t num_words
 
     return 0;
 }
-
-/* ========================================================================== */
-/*                     Clock Divider Configuration                             */
-/* ========================================================================== */
-
 /** @brief Set the clock divider for a BIO core.
  *  @param[in] core Core index (0-3).
  *  @param[in] div_int Integer part of divider.
@@ -429,11 +409,6 @@ void bio_clear_extclk(uint32_t core)
     reg &= ~BIO_EXTCLK_USE(c);
     BIO_SFR_EXTCLOCK = reg;
 }
-
-/* ========================================================================== */
-/*                     Core Control                                            */
-/* ========================================================================== */
-
 /** @brief Start one or more BIO cores by bitmask.
  *  @param[in] core_mask Bitmask of cores to start (bit 0 = core 0, etc.).
  *  @req REQ-DABAO-BIO-0008 */
@@ -478,15 +453,9 @@ void bio_stop_cores(uint32_t core_mask)
  *  @req REQ-DABAO-BIO-0010 */
 void bio_stop_all(void)
 {
-    SEVS_ASSERT(BIO_SFR_CTRL != (uint32_t)-1);
 
     BIO_SFR_CTRL = 0x0;
 }
-
-/* ========================================================================== */
-/*                     Pin Muxing                                              */
-/* ========================================================================== */
-
 /*
  * Internal: set the alternate function for a specific port/pin.
  * Each CRAFSEL register holds 2 bits per pin for 8 pins (16 bits used).
@@ -566,7 +535,6 @@ void bio_unmap_pin(uint32_t bio_pin)
  *  @req REQ-DABAO-BIO-0013 */
 void bio_map_pins_mask(uint32_t mask)
 {
-    SEVS_ASSERT(sizeof(uint32_t) == 4);
 
     uint32_t i;
     for (i = 0; i < 32; i++) {
@@ -575,11 +543,6 @@ void bio_map_pins_mask(uint32_t mask)
         }
     }
 }
-
-/* ========================================================================== */
-/*                     FIFO Utilities                                          */
-/* ========================================================================== */
-
 /** @brief Drain a single BIO FIFO by reading it 16 times.
  *  @param[in] fifo FIFO index (0-3).
  *  @req REQ-DABAO-BIO-0014 */
@@ -597,7 +560,6 @@ void bio_fifo_drain(uint32_t fifo)
  *  @req REQ-DABAO-BIO-0015 */
 void bio_fifo_drain_all(void)
 {
-    SEVS_ASSERT(sizeof(uint32_t) == 4);
 
     bio_fifo_drain(0);
     bio_fifo_drain(1);
@@ -605,17 +567,11 @@ void bio_fifo_drain_all(void)
     bio_fifo_drain(3);
     BIO_SFR_FIFO_CLR = 0xF;
 }
-
-/* ========================================================================== */
-/*                     Info                                                     */
-/* ========================================================================== */
-
 /** @brief Read the BIO hardware version from CFGINFO.
  *  @return Version byte from the CFGINFO register.
  *  @req REQ-DABAO-BIO-0016 */
 uint32_t bio_get_version(void)
 {
-    SEVS_ASSERT(BIO_CFGINFO_VERSION <= 0xFF);
 
     return BIO_SFR_CFGINFO & 0xFF;
 }
@@ -625,7 +581,6 @@ uint32_t bio_get_version(void)
  *  @req REQ-DABAO-BIO-0010 */
 uint32_t bio_get_fclk(void)
 {
-    SEVS_ASSERT(sizeof(s_fclk_hz) == 4);
 
     return s_fclk_hz;
 }

@@ -39,7 +39,6 @@ static const uint32_t irq_array_base[20] = {
     0xE000F000,  /* 19: Mailbox, BIO, SDIO dupes */
 };
 
-/* IRQ array register offsets */
 #define IRQ_EV_PENDING      0x10
 #define IRQ_EV_ENABLE       0x14
 
@@ -47,21 +46,17 @@ static const uint32_t irq_array_base[20] = {
 #define IRQ_TABLE_SIZE      31
 static irq_handler_t irq_handlers[IRQ_TABLE_SIZE];
 
-/* VexRiscv custom CSR access */
 static inline uint32_t csr_read_mim(void) {
-    SEVS_ASSERT(sizeof(uint32_t) == 4);
     uint32_t val;
     __asm__ volatile ("csrr %0, 0xBC0" : "=r"(val));
     return val;
 }
 
 static inline void csr_write_mim(uint32_t val) {
-    SEVS_ASSERT(sizeof(uint32_t) == 4);
     __asm__ volatile ("csrw 0xBC0, %0" :: "r"(val));
 }
 
 static inline uint32_t csr_read_mip_vex(void) {
-    SEVS_ASSERT(sizeof(uint32_t) == 4);
     uint32_t val;
     __asm__ volatile ("csrr %0, 0xFC0" : "=r"(val));
     return val;
@@ -72,7 +67,6 @@ static inline uint32_t csr_read_mip_vex(void) {
 void irq_init(void)
 {
     SEVS_ASSERT(IRQ_TABLE_SIZE == 31);
-    SEVS_ASSERT(sizeof(irq_handlers) > 0);
 
     /* Clear all handlers */
     for (int i = 0; i < IRQ_TABLE_SIZE; i++)
@@ -152,7 +146,6 @@ void irq_disable(uint32_t irq_no)
  *  @req REQ-DABAO-IRQ-0005 */
 void trap_dispatch(void)
 {
-    SEVS_ASSERT(sizeof(uint32_t) == 4);
 
     uint32_t mcause;
     __asm__ volatile ("csrr %0, mcause" : "=r"(mcause));

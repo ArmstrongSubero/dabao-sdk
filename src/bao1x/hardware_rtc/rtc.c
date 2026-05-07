@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * RTC driver for the Baochip-1x.
- * Extracted from working main_rtc.c, verified on Dabao hardware.
  */
 
 #include "hardware/rtc.h"

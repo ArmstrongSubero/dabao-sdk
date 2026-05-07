@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Hardware AES driver for the Baochip-1x SCE.
- * Extracted from verified main_aes.c bare metal example.
  */
 
 #include "hardware/aes.h"

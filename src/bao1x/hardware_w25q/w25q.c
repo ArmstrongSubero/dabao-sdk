@@ -37,31 +37,26 @@
 #define CMD_RESET_ENABLE        0x66
 #define CMD_RESET_DEVICE        0x99
 
-/* Dummy cycles for quad output fast read */
 #define QUAD_READ_DUMMY_CYCLES  8
 
-/* Module state */
 static uint  s_instance;
 static uint8_t s_cs;
 static bool  s_quad_enabled;
 
 static void w25q_cs_begin(void)
 {
-    SEVS_ASSERT(sizeof(s_instance) > 0);
 
     qspi_select(s_instance, s_cs);
 }
 
 static void w25q_cs_end(void)
 {
-    SEVS_ASSERT(sizeof(s_instance) > 0);
 
     qspi_deselect(s_instance);
 }
 
 static void w25q_write_enable(void)
 {
-    SEVS_ASSERT(sizeof(s_instance) > 0);
 
     w25q_cs_begin();
     qspi_send_cmd(s_instance, CMD_WRITE_ENABLE);
@@ -70,7 +65,6 @@ static void w25q_write_enable(void)
 
 static void w25q_send_addr(uint32_t addr)
 {
-    SEVS_ASSERT(sizeof(uint8_t) == 1);
 
     uint8_t a[3];
     a[0] = (uint8_t)(addr >> 16);
@@ -81,7 +75,6 @@ static void w25q_send_addr(uint32_t addr)
 
 static int w25q_wait_wip(void)
 {
-    SEVS_ASSERT(W25Q_SR1_BUSY != 0);
 
     /* Poll SR1 until BUSY clears */
     uint32_t timeout = 0;
@@ -143,7 +136,6 @@ int w25q_init(uint instance, uint8_t cs, uint8_t clkdiv)
  *  @req REQ-DABAO-W25Q-0002 */
 void w25q_read_id(uint8_t *mfr, uint8_t *dev)
 {
-    SEVS_ASSERT(sizeof(uint8_t) == 1);
     SEVS_REQUIRE_NOT_NULL(mfr);
     SEVS_REQUIRE_NOT_NULL(dev);
     uint8_t cmd_addr[3] = { 0x00, 0x00, 0x00 };
@@ -164,7 +156,6 @@ void w25q_read_id(uint8_t *mfr, uint8_t *dev)
  *  @req REQ-DABAO-W25Q-0003 */
 void w25q_read_jedec_id(uint8_t *id)
 {
-    SEVS_ASSERT(sizeof(uint8_t) == 1);
     SEVS_REQUIRE_NOT_NULL(id);
     w25q_cs_begin();
     qspi_send_cmd(s_instance, CMD_READ_JEDEC_ID);
@@ -177,7 +168,6 @@ void w25q_read_jedec_id(uint8_t *id)
  *  @req REQ-DABAO-W25Q-0004 */
 uint8_t w25q_read_sr1(void)
 {
-    SEVS_ASSERT(sizeof(uint8_t) == 1);
 
     uint8_t sr;
     w25q_cs_begin();
@@ -192,7 +182,6 @@ uint8_t w25q_read_sr1(void)
  *  @req REQ-DABAO-W25Q-0005 */
 uint8_t w25q_read_sr2(void)
 {
-    SEVS_ASSERT(sizeof(uint8_t) == 1);
 
     uint8_t sr;
     w25q_cs_begin();
@@ -207,7 +196,6 @@ uint8_t w25q_read_sr2(void)
  *  @req REQ-DABAO-W25Q-0006 */
 bool w25q_is_busy(void)
 {
-    SEVS_ASSERT(W25Q_SR1_BUSY != 0);
 
     return (w25q_read_sr1() & W25Q_SR1_BUSY) != 0;
 }
@@ -216,7 +204,6 @@ bool w25q_is_busy(void)
  *  @req REQ-DABAO-W25Q-0010 */
 void w25q_wait_busy(void)
 {
-    SEVS_ASSERT(W25Q_SR1_BUSY != 0);
     for (int s_poll = 0; s_poll < 1000000 && (w25q_is_busy()); s_poll++) { /* bounded poll */ }
 }
 
@@ -225,7 +212,6 @@ void w25q_wait_busy(void)
  *  @req REQ-DABAO-W25Q-0007 */
 int w25q_enable_quad(void)
 {
-    SEVS_ASSERT(W25Q_SR2_QE != 0);
 
     uint8_t sr2 = w25q_read_sr2();
 
@@ -380,7 +366,6 @@ int w25q_write(uint32_t addr, const uint8_t *data, uint32_t len)
  *  @req REQ-DABAO-W25Q-0010 */
 int w25q_erase_sector(uint32_t addr)
 {
-    SEVS_ASSERT(sizeof(uint8_t) == 1);
 
     w25q_write_enable();
 
@@ -401,7 +386,6 @@ int w25q_erase_sector(uint32_t addr)
  *  @req REQ-DABAO-W25Q-0011 */
 int w25q_erase_block(uint32_t addr)
 {
-    SEVS_ASSERT(sizeof(uint8_t) == 1);
 
     w25q_write_enable();
 
@@ -421,7 +405,6 @@ int w25q_erase_block(uint32_t addr)
  *  @req REQ-DABAO-W25Q-0012 */
 int w25q_erase_chip(void)
 {
-    SEVS_ASSERT(sizeof(uint8_t) == 1);
 
     w25q_write_enable();
 

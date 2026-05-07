@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * I2C master driver for the Baochip-1x UDMA I2C.
- * Extracted from working main_i2c.c (MPU6050), verified on Dabao hardware.
  */
 
 #include "hardware/i2c.h"
@@ -13,12 +12,10 @@
 #include "hardware/regs/udma.h"
 #include "sevs_runtime.h"
 
-/* DMA buffers in IFRAM */
 static uint8_t  i2c_tx_buf[64]  __attribute__((section(".dma_buffers")));
 static uint8_t  i2c_rx_buf[64]  __attribute__((section(".dma_buffers")));
 static uint32_t i2c_cmd_buf[16] __attribute__((section(".dma_buffers")));
 
-/* Instance base addresses */
 static const uintptr_t i2c_base[] = {
     UDMA_I2C0_BASE,
     UDMA_I2C1_BASE,
@@ -37,7 +34,6 @@ static const uint32_t i2c_cg[] = {
 #define I2C_STATUS_OFFSET  0x30
 #define I2C_SETUP_OFFSET   0x34
 
-/* Stored divider for clock speed */
 static uint32_t i2c_divider;
 
 static inline volatile uint32_t *i2c_reg(uint inst, uint offset)

@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * SPI master driver for the Baochip-1x UDMA SPI.
- * Extracted from working main_mcp41010.c, verified on Dabao hardware.
  */
 
 #include "hardware/spi.h"
@@ -12,12 +11,10 @@
 #include "hardware/regs/udma.h"
 #include "sevs_runtime.h"
 
-/* DMA buffers in IFRAM */
 static uint8_t spi_tx_buf[256] __attribute__((section(".dma_buffers")));
 static uint8_t spi_rx_buf[256] __attribute__((section(".dma_buffers")));
 static uint32_t spi_cmd_buf[8] __attribute__((section(".dma_buffers")));
 
-/* Instance base addresses */
 static const uintptr_t spi_base[] = {
     UDMA_SPIM0_BASE,
     UDMA_SPIM1_BASE,
@@ -25,7 +22,6 @@ static const uintptr_t spi_base[] = {
     UDMA_SPIM3_BASE,
 };
 
-/* UDMA clock gate bits */
 static const uint32_t spi_cg[] = {
     UDMA_CG_SPIM0,
     UDMA_CG_SPIM1,

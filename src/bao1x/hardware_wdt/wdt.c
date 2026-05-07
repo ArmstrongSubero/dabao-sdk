@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Watchdog timer driver for the Baochip-1x.
- * Extracted from working main_wdt.c, verified on Dabao hardware.
  */
 
 #include "hardware/wdt.h"
@@ -52,8 +51,6 @@ void wdt_start_raw(uint32_t load_value)
  *  @req REQ-DABAO-WDT-0003 */
 void wdt_feed(void)
 {
-    SEVS_ASSERT(WDT_UNLOCK_KEY != 0);
-    SEVS_ASSERT(WDT_FEED_VALUE != 0);
     WDT_LOCKCR = WDT_UNLOCK_KEY;
     memory_fence();
     WDT_CLR = WDT_FEED_VALUE;
@@ -66,7 +63,5 @@ void wdt_feed(void)
  *  @req REQ-DABAO-WDT-0004 */
 uint32_t wdt_get_count(void)
 {
-    SEVS_ASSERT(WDT_CLK_HZ > 0);
-    SEVS_ASSERT(sizeof(uint32_t) == 4);
     return WDT_CNT;
 }

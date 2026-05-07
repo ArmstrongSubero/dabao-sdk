@@ -3,15 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Delay functions using the VexRiscv tick timer.
- * Extracted from working bare metal code, verified on hardware.
  */
 
 #include "bao/stdlib.h"
 #include "hardware/regs/addressmap.h"
 #include "hardware/regs/timer.h"
 #include "sevs_runtime.h"
-
-
 static int s_ticktimer_initialized = 0;
 
 static void ticktimer_init(void)

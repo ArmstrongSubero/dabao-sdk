@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Hardware SHA-256 driver for the Baochip-1x SCE.
- * Extracted from verified main_sha.c bare metal example.
  */
 
 #include "hardware/sha.h"
@@ -85,8 +84,6 @@ static void s_hash_wait_done(void)
  *  @req REQ-DABAO-SHA-0001 */
 void sha256_init(void)
 {
-    SEVS_ASSERT(sizeof(s_sha256_h) == 32);
-    SEVS_ASSERT(sizeof(s_sha256_k) == 256);
     SCE_SCEMODE = 0;
     SCE_SUBCLKEN |= (1 << 2);
     memory_fence();

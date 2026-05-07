@@ -23,7 +23,6 @@ static uint8_t uart_tx_buf[256] __attribute__((section(".dma_buffers")));
 /* Detected peripheral clock, set on first uart_init call */
 static uint32_t s_perclk = 0;
 
-/* UART instance base addresses */
 static const uintptr_t uart_base[] = {
     UDMA_UART0_BASE,
     UDMA_UART1_BASE,
@@ -31,7 +30,6 @@ static const uintptr_t uart_base[] = {
     UDMA_UART3_BASE,
 };
 
-/* UDMA clock gate bits for each UART */
 static const uint32_t uart_cg[] = {
     UDMA_CG_UART0,
     UDMA_CG_UART1,
@@ -51,7 +49,6 @@ static inline volatile uint32_t *uart_reg(uint inst, uint offset)
  */
 static uint32_t detect_perclk(void)
 {
-    SEVS_ASSERT(UDMA_UART2_BASE != 0);
 
     uint32_t setup = REG32(UDMA_UART2_BASE + UDMA_UART_SETUP_OFFSET);
     uint32_t div = setup >> 16;
@@ -189,14 +186,12 @@ char uart_getc(uint instance)
  *  @req REQ-DABAO-UART-0005 */
 uint32_t uart_get_perclk(void)
 {
-    SEVS_ASSERT(sizeof(s_perclk) == 4);
 
     if (s_perclk == 0)
         s_perclk = detect_perclk();
     return s_perclk;
 }
 
-/* Async TX state per instance */
 static volatile bool uart_tx_busy[4] = { false, false, false, false };
 
 /** @brief Start a non-blocking UART transmit via DMA.

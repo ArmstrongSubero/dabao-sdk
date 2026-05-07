@@ -5,7 +5,6 @@
  * Minimal printf for the Dabao board.
  * Output goes to UART2 via the UDMA driver.
  *
- * Extracted from working main_sd_spi.c, verified on hardware.
  */
 
 #include "bao/stdlib.h"

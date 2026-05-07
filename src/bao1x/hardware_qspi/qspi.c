@@ -24,7 +24,6 @@ static uint8_t  qspi_tx_buf[256]  __attribute__((section(".dma_buffers")));
 static uint8_t  qspi_rx_buf[256]  __attribute__((section(".dma_buffers")));
 static uint32_t qspi_cmd_buf[16]  __attribute__((section(".dma_buffers")));
 
-/* SPIM instance base addresses */
 static const uintptr_t spim_base[] = {
     UDMA_SPIM0_BASE,
     UDMA_SPIM1_BASE,
@@ -32,7 +31,6 @@ static const uintptr_t spim_base[] = {
     UDMA_SPIM3_BASE,
 };
 
-/* UDMA clock gate bits */
 static const uint32_t spim_cg[] = {
     UDMA_CG_SPIM0,
     UDMA_CG_SPIM1,
@@ -40,7 +38,6 @@ static const uint32_t spim_cg[] = {
     UDMA_CG_SPIM3,
 };
 
-/* Stored clock divider per instance */
 static uint8_t qspi_clkdiv[4];
 
 static inline volatile uint32_t *qreg(uint inst, uint offset)
@@ -50,20 +47,17 @@ static inline volatile uint32_t *qreg(uint inst, uint offset)
 
 static void qspi_wait_cmd(uint inst)
 {
-    SEVS_ASSERT(UDMA_CFG_EN != 0);
 
     for (int s_poll = 0; s_poll < 1000000 && (*qreg(inst, UDMA_CMD_CFG_OFFSET) & UDMA_CFG_EN); s_poll++) { /* bounded poll */ }
 }
 
 static void qspi_wait_tx(uint inst)
 {
-    SEVS_ASSERT(UDMA_CFG_EN != 0);
     for (int s_poll = 0; s_poll < 1000000 && (*qreg(inst, UDMA_TX_CFG_OFFSET) & UDMA_CFG_EN); s_poll++) { /* bounded poll */ }
 }
 
 static void qspi_wait_rx(uint inst)
 {
-    SEVS_ASSERT(UDMA_CFG_EN != 0);
     for (int s_poll = 0; s_poll < 1000000 && (*qreg(inst, UDMA_RX_CFG_OFFSET) & UDMA_CFG_EN); s_poll++) { /* bounded poll */ }
 }
 

@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * ADC driver for the Baochip-1x UDMA ADC.
- * Extracted from working main_adc.c, verified on Dabao hardware.
  */
 
 #include "hardware/adc.h"
@@ -13,7 +12,6 @@
 #include "hardware/regs/udma.h"
 #include "sevs_runtime.h"
 
-/* ADC registers */
 #define ADC0_RX_SADDR   REG32(UDMA_ADC_BASE + 0x00)
 #define ADC0_RX_SIZE    REG32(UDMA_ADC_BASE + 0x04)
 #define ADC0_RX_CFG     REG32(UDMA_ADC_BASE + 0x08)
@@ -45,7 +43,6 @@
 /** @brief Maximum DMA poll iterations before timeout. */
 #define ADC_POLL_TIMEOUT 1000000
 
-/* DMA buffer in IFRAM */
 static uint32_t s_adc_rx_buf __attribute__((section(".dma_buffers")));
 
 /** @brief Initialize the ADC subsystem and configure the analog input pin.

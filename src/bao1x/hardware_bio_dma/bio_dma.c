@@ -62,7 +62,6 @@ static bool s_dma_initialized = false;
 void bio_dma_init(void)
 {
     SEVS_ASSERT(DMA_CORE == 3);
-    SEVS_ASSERT(sizeof(bio_dma_code) > 0);
     if (s_dma_initialized) return;
 
     /* Stop Core 3 only, preserve other cores' state */
@@ -143,7 +142,6 @@ void bio_dma_start(void *dst, const void *src, uint32_t len)
  *  @req REQ-DABAO-BIO-DMA-0003 */
 bool bio_dma_busy(void)
 {
-    SEVS_ASSERT(sizeof(uint32_t) == 4);
     return (BIO_SFR_EVENT_STATUS & 0x1) == 0;
 }
 
@@ -151,7 +149,6 @@ bool bio_dma_busy(void)
  *  @req REQ-DABAO-BIO-DMA-0004 */
 void bio_dma_wait(void)
 {
-    SEVS_ASSERT(sizeof(uint32_t) == 4);
     /* Wait for event bit 0 (set by the BIO program when done) */
     for (int s_poll = 0; s_poll < 1000000 && (bio_dma_busy()); s_poll++) { /* bounded poll */ }
 
