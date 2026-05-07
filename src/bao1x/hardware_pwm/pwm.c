@@ -78,13 +78,9 @@ uint16_t pwm_init(uint slice, uint32_t freq_hz)
      */
     uint32_t prescaler = 0;
     uint32_t period;
-    for (int s_guard = 0; s_guard < 256; s_guard++) {
+    for (prescaler = 0; prescaler < 256; prescaler++) {
         period = (pwm_clk / (prescaler + 1)) / freq_hz;
         if (period <= 65535) break;
-        prescaler++;
-    if (period <= 65535) { break; }
-        prescaler++;
-        if (prescaler >= 256) { break; }
     }
 
     if (period > 65535) period = 65535;

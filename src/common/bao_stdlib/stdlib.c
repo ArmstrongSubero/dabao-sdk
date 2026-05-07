@@ -43,7 +43,7 @@ int memcmp(const void *a, const void *b, size_t n)
     SEVS_REQUIRE_NOT_NULL(b);
     const uint8_t *p = (const uint8_t *)a;
     const uint8_t *q = (const uint8_t *)b;
-    for (int s_poll = 0; s_poll < 1000000 && (n--); s_poll++) {
+    while (n--) {
         if (*p != *q) return *p - *q;
         p++; q++;
     }
@@ -52,7 +52,7 @@ int memcmp(const void *a, const void *b, size_t n)
 
 char *strchr(const char *s, int c)
 {
-    for (int s_guard = 0; s_guard < 100000 && (*s); s_guard++) {
+    while (*s) {
         if (*s == (char)c) return (char *)s;
         s++;
     }

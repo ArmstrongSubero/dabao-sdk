@@ -21,7 +21,7 @@ static void print_unsigned(uint32_t val, int base, int min_digits)
     if (val == 0) {
         buf[i++] = '0';
     } else {
-        for (int s_poll = 0; s_poll < 1000000 && (val > 0); s_poll++) {
+        while (val > 0) {
             uint32_t d = val % base;
             buf[i++] = (d < 10) ? ('0' + d) : ('a' + d - 10);
             val /= base;
@@ -43,13 +43,13 @@ void mini_printf(const char *fmt, ...)
     __builtin_va_list ap;
     __builtin_va_start(ap, fmt);
 
-    for (int s_guard = 0; s_guard < 100000 && (*fmt); s_guard++) {
+    while (*fmt) {
         if (*fmt == '%') {
             fmt++;
             int md = 0;
             if (*fmt == '0') {
                 fmt++;
-                for (int s_guard = 0; s_guard < 100000 && (*fmt >= '0' && *fmt <= '9'); s_guard++) {
+                while (*fmt >= '0' && *fmt <= '9') {
                     md = md * 10 + (*fmt - '0');
                     fmt++;
                 }

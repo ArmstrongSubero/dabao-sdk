@@ -37,7 +37,7 @@ void delay_ms(uint32_t ms)
 {
     if (!s_ticktimer_initialized) ticktimer_init();
     uint64_t start = millis();
-    for (int s_poll = 0; s_poll < 1000000 && ((millis() - start) < ms); s_poll++) { /* bounded poll */ }
+    while ((millis() - start) < ms) {}
 }
 
 void delay_us(uint32_t us)
