@@ -61,7 +61,6 @@ uint16_t pwm_init(uint slice, uint32_t freq_hz)
      * timer_clock = PCLK / (prescaler + 1)
      * frequency = timer_clock / period
      *
-     * PCLK = 43.75 MHz, verified on hardware.
      */
     uint32_t pwm_clk = ACLK_HZ / 8;
 

@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * GPIO driver for the Baochip-1x IOX.
- * Register addresses and sequences extracted from working bare metal code.
  */
 
 #include "hardware/gpio.h"

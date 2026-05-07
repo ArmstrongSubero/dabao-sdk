@@ -7,8 +7,6 @@
  * Transmit uses UDMA DMA transfers through an IFRAM buffer.
  * Receive uses the polling path (REG_VALID / REG_DATA).
  *
- * Code extracted from working main_sd_spi.c and main_uart.c,
- * both verified on Dabao hardware.
  */
 
 #include "hardware/uart.h"
