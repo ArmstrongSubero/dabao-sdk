@@ -39,7 +39,7 @@
 /* Where the crash record lives in RAM. Survives soft reset. Override per
  * target; default points at a fixed address near top of RAM. */
 #ifndef SEVS_CRASH_RECORD_ADDR
-#  define SEVS_CRASH_RECORD_ADDR ((uintptr_t)0x20003F00U)
+#  define SEVS_CRASH_RECORD_ADDR ((uintptr_t)0x61100000U)  /* Baochip-1x SRAM */
 #endif
 
 /* Magic value identifying a valid crash record. */
