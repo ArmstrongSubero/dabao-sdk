@@ -23,11 +23,41 @@
 
 set -e
 
+# ---- SDK root ----
+# Always run from the SDK root so examples/, src/, tools/, and bao1x.ld
+# resolve correctly even if this script is launched from another directory.
+
+SDK_ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$SDK_ROOT"
+
 # ---- Toolchain detection ----
-if [ -x "xpack-riscv-none-elf-gcc-15.2.0-1/bin/riscv-none-elf-gcc" ]; then
-    CROSS="xpack-riscv-none-elf-gcc-15.2.0-1/bin/riscv-none-elf-"
+# Prefer local xPack toolchain inside the SDK, then fall back to PATH.
+
+LOCAL_CROSS="xpack-riscv-none-elf-gcc-15.2.0-1/bin/riscv-none-elf-"
+LOCAL_GCC="${LOCAL_CROSS}gcc"
+
+if [ -x "$LOCAL_GCC" ]; then
+    CROSS="$LOCAL_CROSS"
+    echo "Using local xPack toolchain."
+    echo "  $SDK_ROOT/$LOCAL_GCC"
 else
-    CROSS="riscv-none-elf-"
+    if command -v riscv-none-elf-gcc >/dev/null 2>&1; then
+        CROSS="riscv-none-elf-"
+        echo "Using RISC-V toolchain from PATH."
+    else
+        echo "ERROR: RISC-V toolchain not found."
+        echo
+        echo "Tried local toolchain:"
+        echo "  $SDK_ROOT/$LOCAL_GCC"
+        echo
+        echo "Also tried PATH:"
+        echo "  riscv-none-elf-gcc"
+        echo
+        echo "Fix:"
+        echo "  1. Put xpack-riscv-none-elf-gcc-15.2.0-1 beside bao_flash.sh, or"
+        echo "  2. Add riscv-none-elf-gcc to PATH."
+        exit 1
+    fi
 fi
 
 ARCH="-march=rv32imac_zicsr_zifencei -mabi=ilp32"
