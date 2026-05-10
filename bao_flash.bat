@@ -111,10 +111,37 @@ if not exist "%EXAMPLE_DIR%" (
     goto :end
 )
 
-if exist "xpack-riscv-none-elf-gcc-15.2.0-1\bin\riscv-none-elf-gcc.exe" (
-    set CROSS=xpack-riscv-none-elf-gcc-15.2.0-1\bin\riscv-none-elf-
+REM ---- Toolchain detection ----
+REM Prefer local xPack toolchain beside this script, then fall back to PATH.
+
+set "SDK_ROOT=%~dp0"
+set "LOCAL_CROSS=%SDK_ROOT%xpack-riscv-none-elf-gcc-15.2.0-1\bin\riscv-none-elf-"
+set "LOCAL_GCC=%LOCAL_CROSS%gcc.exe"
+
+if exist "%LOCAL_GCC%" (
+    set "CROSS=%LOCAL_CROSS%"
+    echo Using local xPack toolchain.
+    echo   %LOCAL_GCC%
 ) else (
-    set CROSS=riscv-none-elf-
+    where riscv-none-elf-gcc.exe >nul 2>nul
+    if errorlevel 1 (
+        echo ERROR: RISC-V toolchain not found.
+        echo.
+        echo Tried local toolchain:
+        echo   %LOCAL_GCC%
+        echo.
+        echo Also tried PATH:
+        echo   riscv-none-elf-gcc.exe
+        echo.
+        echo Fix:
+        echo   1. Put xpack-riscv-none-elf-gcc-15.2.0-1 beside bao_flash.bat, or
+        echo   2. Add riscv-none-elf-gcc.exe to PATH.
+        echo.
+        goto :fail
+    )
+
+    set "CROSS=riscv-none-elf-"
+    echo Using RISC-V toolchain from PATH.
 )
 
 set ARCH=-march=rv32imac_zicsr_zifencei -mabi=ilp32
