@@ -32,6 +32,14 @@ cd "$SDK_ROOT"
 
 # ---- Toolchain detection ----
 # Prefer local xPack toolchain inside the SDK, then fall back to PATH.
+#
+# Checks:
+#   1. xpack-riscv-none-elf-gcc-15.2.0-1/bin/riscv-none-elf-gcc
+#   2. xpack-riscv-none-elf-gcc-*/bin/riscv-none-elf-gcc
+#   3. xpack-riscv-none-elf-gcc-*/xpack-riscv-none-elf-gcc-*/bin/riscv-none-elf-gcc
+#   4. riscv-none-elf-gcc from PATH
+
+CROSS=""
 
 LOCAL_CROSS="xpack-riscv-none-elf-gcc-15.2.0-1/bin/riscv-none-elf-"
 LOCAL_GCC="${LOCAL_CROSS}gcc"
@@ -41,6 +49,24 @@ if [ -x "$LOCAL_GCC" ]; then
     echo "Using local xPack toolchain."
     echo "  $SDK_ROOT/$LOCAL_GCC"
 else
+    for d in xpack-riscv-none-elf-gcc-*; do
+        if [ -z "$CROSS" ] && [ -x "$d/bin/riscv-none-elf-gcc" ]; then
+            CROSS="$d/bin/riscv-none-elf-"
+            echo "Using local xPack toolchain."
+            echo "  $SDK_ROOT/$d/bin/riscv-none-elf-gcc"
+        fi
+
+        for e in "$d"/xpack-riscv-none-elf-gcc-*; do
+            if [ -z "$CROSS" ] && [ -x "$e/bin/riscv-none-elf-gcc" ]; then
+                CROSS="$e/bin/riscv-none-elf-"
+                echo "Using local xPack toolchain."
+                echo "  $SDK_ROOT/$e/bin/riscv-none-elf-gcc"
+            fi
+        done
+    done
+fi
+
+if [ -z "$CROSS" ]; then
     if command -v riscv-none-elf-gcc >/dev/null 2>&1; then
         CROSS="riscv-none-elf-"
         echo "Using RISC-V toolchain from PATH."
@@ -49,6 +75,8 @@ else
         echo
         echo "Tried local toolchain:"
         echo "  $SDK_ROOT/$LOCAL_GCC"
+        echo "  $SDK_ROOT/xpack-riscv-none-elf-gcc-*/bin/riscv-none-elf-gcc"
+        echo "  $SDK_ROOT/xpack-riscv-none-elf-gcc-*/xpack-riscv-none-elf-gcc-*/bin/riscv-none-elf-gcc"
         echo
         echo "Also tried PATH:"
         echo "  riscv-none-elf-gcc"
@@ -141,16 +169,40 @@ usage() {
 }
 
 list_examples() {
+    local found
+    local d
+
     echo "Available examples:"
+
+    if [ ! -d examples ]; then
+        echo "  No examples directory found."
+        exit 1
+    fi
+
+    found=0
+
     for d in examples/*/; do
-        echo "  $(basename "$d")"
+        if [ -d "$d" ]; then
+            echo "  $(basename "$d")"
+            found=1
+        fi
     done
+
+    if [ "$found" -eq 0 ]; then
+        echo "  No examples found."
+    fi
+
     exit 0
 }
 
 do_build() {
     local EXAMPLE="$1"
     local EXAMPLE_DIR="examples/$EXAMPLE"
+    local MAIN_SRC=""
+    local EXTRA_OBJS=""
+    local SDK_OBJS=""
+    local f
+    local obj
 
     if [ ! -d "$EXAMPLE_DIR" ]; then
         echo "Error: example \"$EXAMPLE\" not found in examples/"
@@ -170,20 +222,31 @@ do_build() {
 
     echo "[2/4] Compiling SDK ..."
     for f in $SDK_SRCS; do
-        name=$(basename "$f" .c)
-        ${CROSS}gcc $ARCH $CFLAGS $INC -c -o "build/${name}.o" "$f"
+        obj="build/${f%.c}.o"
+        obj="${obj//\//_}"
+
+        ${CROSS}gcc $ARCH $CFLAGS $INC -c -o "$obj" "$f"
+
+        SDK_OBJS="$SDK_OBJS $obj"
     done
 
     echo "[3/4] Compiling $EXAMPLE ..."
-    MAIN_SRC=$(ls "$EXAMPLE_DIR"/*.c 2>/dev/null | head -1)
+
+    for f in "$EXAMPLE_DIR"/*.c; do
+        if [ -f "$f" ]; then
+            MAIN_SRC="$f"
+            break
+        fi
+    done
+
     if [ -z "$MAIN_SRC" ]; then
         echo "Error: no .c file found in $EXAMPLE_DIR"
         exit 1
     fi
+
     ${CROSS}gcc $ARCH $CFLAGS $INC -c -o build/main.o "$MAIN_SRC"
 
     # Third-party libraries
-    EXTRA_OBJS=""
     if [ "$EXAMPLE" = "fatfs" ]; then
         echo "       Compiling FatFS ..."
         ${CROSS}gcc $ARCH $CFLAGS $INC -Ithird_party/fatfs -c -o build/ff.o third_party/fatfs/ff.c
@@ -194,13 +257,11 @@ do_build() {
     echo "[4/4] Linking $EXAMPLE.uf2 ..."
     ${CROSS}gcc $ARCH -T bao1x.ld -nostdlib -nostartfiles -Wl,--gc-sections \
         -o "build/${EXAMPLE}.elf" \
-        build/crt0.o build/gpio.o build/uart.o build/pwm.o build/spi.o \
-        build/i2c.o build/adc.o build/trng.o build/wdt.o build/rtc.o \
-        build/bio.o build/bio_dma.o build/irq.o build/rram.o build/aes.o build/sha.o \
-        build/qspi.o build/w25q.o \
-        build/stdio.o build/delay.o build/stdlib.o build/sevs_assert_target.o \
+        build/crt0.o \
+        $SDK_OBJS \
         build/main.o \
-        $EXTRA_OBJS -lgcc
+        $EXTRA_OBJS \
+        -lgcc
 
     ${CROSS}objcopy -O binary "build/${EXAMPLE}.elf" "build/${EXAMPLE}.bin"
 
@@ -218,22 +279,23 @@ do_build() {
 do_flash() {
     local PORT="$1"
     local EXAMPLE="$2"
+    local UF2
+    local DTR_PORT
+
     shift 2
 
-    local UF2="build/${EXAMPLE}.uf2"
+    UF2="build/${EXAMPLE}.uf2"
+
     if [ ! -f "$UF2" ]; then
         echo "Error: $UF2 not found. Run \"./bao.sh build $EXAMPLE\" first."
         exit 1
     fi
 
-    local FLASH_ARGS=""
-
     while [ $# -gt 0 ]; do
         case "$1" in
             --persistent)
-                FLASH_ARGS="--persistent"
                 echo "Flashing $UF2 via $PORT (persistent mode) ..."
-                python3 tools/serial_flash.py $FLASH_ARGS "$PORT" "$UF2"
+                python3 tools/serial_flash.py --persistent "$PORT" "$UF2"
                 return
                 ;;
             --icsp)
@@ -241,7 +303,7 @@ do_flash() {
                     echo "Error: --icsp requires a DTR port argument"
                     exit 1
                 fi
-                local DTR_PORT="$2"
+                DTR_PORT="$2"
                 shift
                 echo "Flashing $UF2 via $DTR_PORT + $PORT (ICSP mode) ..."
                 python3 tools/serial_flash.py --icsp "$DTR_PORT" "$PORT" "$UF2"

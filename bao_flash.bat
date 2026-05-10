@@ -15,9 +15,16 @@ REM   bao list                                      List available examples
 
 setlocal enabledelayedexpansion
 
+REM ---- SDK root ----
+REM Run all commands from the folder where this batch file lives.
+REM This preserves the original working relative paths while allowing the
+REM script to be launched from another directory.
+set "SDK_ROOT=%~dp0"
+pushd "%SDK_ROOT%" >nul
+
 REM ---- Parse command ----
 if "%~1"=="" goto :usage
-set CMD=%~1
+set "CMD=%~1"
 
 if /I "%CMD%"=="list" goto :cmd_list
 if /I "%CMD%"=="build" goto :cmd_build
@@ -56,7 +63,18 @@ goto :end
 REM ================================================================
 :cmd_list
 echo Available examples:
-for /D %%d in (examples\*) do echo   %%~nd
+if not exist "examples\" (
+    echo   No examples directory found.
+    goto :end
+)
+
+set "FOUND_EXAMPLE=0"
+for /D %%d in (examples\*) do (
+    echo   %%~nd
+    set "FOUND_EXAMPLE=1"
+)
+
+if "!FOUND_EXAMPLE!"=="0" echo   No examples found.
 goto :end
 
 REM ================================================================
@@ -65,8 +83,8 @@ if "%~2"=="" (
     echo Usage: bao build ^<example^>
     goto :end
 )
-set B_EXAMPLE=%~2
-set B_RETURN=end
+set "B_EXAMPLE=%~2"
+set "B_RETURN=end"
 goto :do_build
 
 REM ================================================================
@@ -80,10 +98,10 @@ if "%~3"=="" (
     echo Usage: bao flash ^<port^> ^<example^> [--persistent^|--icsp ^<dtr^>^|--icsp-single]
     goto :end
 )
-set F_PORT=%~2
-set F_EXAMPLE=%~3
-set F_OPT=%~4
-set F_ARG=%~5
+set "F_PORT=%~2"
+set "F_EXAMPLE=%~3"
+set "F_OPT=%~4"
+set "F_ARG=%~5"
 goto :do_flash
 
 REM ================================================================
@@ -92,49 +110,76 @@ if "%~3"=="" (
     echo Usage: bao run ^<port^> ^<example^> [--persistent^|--icsp ^<dtr^>^|--icsp-single]
     goto :end
 )
-set B_EXAMPLE=%~3
-set F_PORT=%~2
-set F_EXAMPLE=%~3
-set F_OPT=%~4
-set F_ARG=%~5
-set B_RETURN=do_flash
+set "B_EXAMPLE=%~3"
+set "F_PORT=%~2"
+set "F_EXAMPLE=%~3"
+set "F_OPT=%~4"
+set "F_ARG=%~5"
+set "B_RETURN=do_flash"
 goto :do_build
 
 REM ================================================================
 REM  BUILD
 REM ================================================================
 :do_build
-set EXAMPLE_DIR=examples\%B_EXAMPLE%
+set "EXAMPLE_DIR=examples\%B_EXAMPLE%"
 
-if not exist "%EXAMPLE_DIR%" (
+if not exist "%EXAMPLE_DIR%\" (
     echo Error: example "%B_EXAMPLE%" not found in examples\
     goto :end
 )
 
 REM ---- Toolchain detection ----
 REM Prefer local xPack toolchain beside this script, then fall back to PATH.
+REM This keeps the original working build layout and only changes how CROSS is selected.
 
-set "SDK_ROOT=%~dp0"
-set "LOCAL_CROSS=%SDK_ROOT%xpack-riscv-none-elf-gcc-15.2.0-1\bin\riscv-none-elf-"
+set "CROSS="
+set "LOCAL_CROSS=xpack-riscv-none-elf-gcc-15.2.0-1\bin\riscv-none-elf-"
 set "LOCAL_GCC=%LOCAL_CROSS%gcc.exe"
 
 if exist "%LOCAL_GCC%" (
     set "CROSS=%LOCAL_CROSS%"
     echo Using local xPack toolchain.
-    echo   %LOCAL_GCC%
+    echo   %SDK_ROOT%%LOCAL_GCC%
 ) else (
+    REM If the archive extracted into an extra nested folder, find it.
+    for /D %%d in (xpack-riscv-none-elf-gcc-*) do (
+        if not defined CROSS (
+            if exist "%%~fd\bin\riscv-none-elf-gcc.exe" (
+                set "CROSS=%%~fd\bin\riscv-none-elf-"
+                echo Using local xPack toolchain.
+                echo   %%~fd\bin\riscv-none-elf-gcc.exe
+            )
+        )
+
+        if not defined CROSS (
+            for /D %%e in ("%%~fd\xpack-riscv-none-elf-gcc-*") do (
+                if not defined CROSS (
+                    if exist "%%~fe\bin\riscv-none-elf-gcc.exe" (
+                        set "CROSS=%%~fe\bin\riscv-none-elf-"
+                        echo Using local xPack toolchain.
+                        echo   %%~fe\bin\riscv-none-elf-gcc.exe
+                    )
+                )
+            )
+        )
+    )
+)
+
+if not defined CROSS (
     where riscv-none-elf-gcc.exe >nul 2>nul
     if errorlevel 1 (
         echo ERROR: RISC-V toolchain not found.
         echo.
-        echo Tried local toolchain:
-        echo   %LOCAL_GCC%
+        echo Tried local xPack:
+        echo   %SDK_ROOT%%LOCAL_GCC%
+        echo   %SDK_ROOT%xpack-riscv-none-elf-gcc-*\bin\riscv-none-elf-gcc.exe
         echo.
         echo Also tried PATH:
         echo   riscv-none-elf-gcc.exe
         echo.
         echo Fix:
-        echo   1. Put xpack-riscv-none-elf-gcc-15.2.0-1 beside bao_flash.bat, or
+        echo   1. Put xpack-riscv-none-elf-gcc-15.2.0-1 beside this batch file, or
         echo   2. Add riscv-none-elf-gcc.exe to PATH.
         echo.
         goto :fail
@@ -144,34 +189,34 @@ if exist "%LOCAL_GCC%" (
     echo Using RISC-V toolchain from PATH.
 )
 
-set ARCH=-march=rv32imac_zicsr_zifencei -mabi=ilp32
-set CFLAGS=-Os -Wall -Wextra -ffreestanding -nostdlib -g
+set "ARCH=-march=rv32imac_zicsr_zifencei -mabi=ilp32"
+set "CFLAGS=-Os -Wall -Wextra -ffreestanding -nostdlib -g"
 
-set INC=-Isrc\common\bao_base\include
-set INC=!INC! -Isrc\common\bao_stdlib\include
-set INC=!INC! -Isrc\bao1x\hardware_regs\include
-set INC=!INC! -Isrc\bao1x\hardware_gpio\include
-set INC=!INC! -Isrc\bao1x\hardware_uart\include
-set INC=!INC! -Isrc\bao1x\hardware_pwm\include
-set INC=!INC! -Isrc\bao1x\hardware_spi\include
-set INC=!INC! -Isrc\bao1x\hardware_i2c\include
-set INC=!INC! -Isrc\bao1x\hardware_adc\include
-set INC=!INC! -Isrc\bao1x\hardware_trng\include
-set INC=!INC! -Isrc\bao1x\hardware_wdt\include
-set INC=!INC! -Isrc\bao1x\hardware_rtc\include
-set INC=!INC! -Isrc\bao1x\hardware_bio\include
-set INC=!INC! -Isrc\bao1x\hardware_timer\include
-set INC=!INC! -Isrc\bao1x\hardware_bio_dma\include
-set INC=!INC! -Isrc\bao1x\hardware_irq\include
-set INC=!INC! -Isrc\bao1x\hardware_rram\include
-set INC=!INC! -Isrc\bao1x\hardware_aes\include
-set INC=!INC! -Isrc\bao1x\hardware_sha\include
-set INC=!INC! -Isrc\bao1x\hardware_qspi\include
-set INC=!INC! -Isrc\bao1x\hardware_w25q\include
-set INC=!INC! -Isrc\bao1x\hardware_reset\include
-set INC=!INC! -Isrc\boards\include
-set INC=!INC! -Isrc\sevs
-set INC=!INC! -Ithird_party\fatfs
+set "INC=-Isrc\common\bao_base\include"
+set "INC=!INC! -Isrc\common\bao_stdlib\include"
+set "INC=!INC! -Isrc\bao1x\hardware_regs\include"
+set "INC=!INC! -Isrc\bao1x\hardware_gpio\include"
+set "INC=!INC! -Isrc\bao1x\hardware_uart\include"
+set "INC=!INC! -Isrc\bao1x\hardware_pwm\include"
+set "INC=!INC! -Isrc\bao1x\hardware_spi\include"
+set "INC=!INC! -Isrc\bao1x\hardware_i2c\include"
+set "INC=!INC! -Isrc\bao1x\hardware_adc\include"
+set "INC=!INC! -Isrc\bao1x\hardware_trng\include"
+set "INC=!INC! -Isrc\bao1x\hardware_wdt\include"
+set "INC=!INC! -Isrc\bao1x\hardware_rtc\include"
+set "INC=!INC! -Isrc\bao1x\hardware_bio\include"
+set "INC=!INC! -Isrc\bao1x\hardware_timer\include"
+set "INC=!INC! -Isrc\bao1x\hardware_bio_dma\include"
+set "INC=!INC! -Isrc\bao1x\hardware_irq\include"
+set "INC=!INC! -Isrc\bao1x\hardware_rram\include"
+set "INC=!INC! -Isrc\bao1x\hardware_aes\include"
+set "INC=!INC! -Isrc\bao1x\hardware_sha\include"
+set "INC=!INC! -Isrc\bao1x\hardware_qspi\include"
+set "INC=!INC! -Isrc\bao1x\hardware_w25q\include"
+set "INC=!INC! -Isrc\bao1x\hardware_reset\include"
+set "INC=!INC! -Isrc\boards\include"
+set "INC=!INC! -Isrc\sevs"
+set "INC=!INC! -Ithird_party\fatfs"
 
 echo.
 echo ============================================
@@ -182,86 +227,94 @@ echo.
 if not exist build mkdir build
 
 echo [1/4] Assembling startup ...
-!CROSS!gcc !ARCH! -g -c -o build\crt0.o src\runtime\crt0.S
+"!CROSS!gcc" !ARCH! -g -c -o build\crt0.o src\runtime\crt0.S
 if errorlevel 1 goto :fail
 
 echo [2/4] Compiling SDK ...
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\gpio.o src\bao1x\hardware_gpio\gpio.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\gpio.o src\bao1x\hardware_gpio\gpio.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\uart.o src\bao1x\hardware_uart\uart.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\uart.o src\bao1x\hardware_uart\uart.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\pwm.o src\bao1x\hardware_pwm\pwm.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\pwm.o src\bao1x\hardware_pwm\pwm.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\spi.o src\bao1x\hardware_spi\spi.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\spi.o src\bao1x\hardware_spi\spi.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\i2c.o src\bao1x\hardware_i2c\i2c.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\i2c.o src\bao1x\hardware_i2c\i2c.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\adc.o src\bao1x\hardware_adc\adc.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\adc.o src\bao1x\hardware_adc\adc.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\trng.o src\bao1x\hardware_trng\trng.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\trng.o src\bao1x\hardware_trng\trng.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\wdt.o src\bao1x\hardware_wdt\wdt.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\wdt.o src\bao1x\hardware_wdt\wdt.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\rtc.o src\bao1x\hardware_rtc\rtc.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\rtc.o src\bao1x\hardware_rtc\rtc.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\bio.o src\bao1x\hardware_bio\bio.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\bio.o src\bao1x\hardware_bio\bio.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\bio_dma.o src\bao1x\hardware_bio_dma\bio_dma.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\bio_dma.o src\bao1x\hardware_bio_dma\bio_dma.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\irq.o src\bao1x\hardware_irq\irq.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\irq.o src\bao1x\hardware_irq\irq.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\rram.o src\bao1x\hardware_rram\rram.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\rram.o src\bao1x\hardware_rram\rram.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\aes.o src\bao1x\hardware_aes\aes.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\aes.o src\bao1x\hardware_aes\aes.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\sha.o src\bao1x\hardware_sha\sha.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\sha.o src\bao1x\hardware_sha\sha.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\qspi.o src\bao1x\hardware_qspi\qspi.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\qspi.o src\bao1x\hardware_qspi\qspi.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\w25q.o src\bao1x\hardware_w25q\w25q.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\w25q.o src\bao1x\hardware_w25q\w25q.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\stdio.o src\common\bao_stdlib\stdio.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\stdio.o src\common\bao_stdlib\stdio.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\delay.o src\common\bao_stdlib\delay.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\delay.o src\common\bao_stdlib\delay.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\stdlib.o src\common\bao_stdlib\stdlib.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\stdlib.o src\common\bao_stdlib\stdlib.c
 if errorlevel 1 goto :fail
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\sevs_assert_target.o src\sevs\sevs_assert_target.c
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\sevs_assert_target.o src\sevs\sevs_assert_target.c
 if errorlevel 1 goto :fail
 
 echo [3/4] Compiling %B_EXAMPLE% ...
-set MAIN_SRC=
-for %%f in (%EXAMPLE_DIR%\*.c) do set MAIN_SRC=%%f
+set "MAIN_SRC="
+for %%f in ("%EXAMPLE_DIR%\*.c") do (
+    if exist "%%~f" (
+        set "MAIN_SRC=%%~f"
+        goto :main_src_found
+    )
+)
+
+:main_src_found
 if "!MAIN_SRC!"=="" (
     echo Error: no .c file found in %EXAMPLE_DIR%
     goto :fail
 )
-!CROSS!gcc !ARCH! !CFLAGS! !INC! -c -o build\main.o !MAIN_SRC!
+
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\main.o "!MAIN_SRC!"
 if errorlevel 1 goto :fail
 
 REM Third-party libraries
-set EXTRA_OBJS=
+set "EXTRA_OBJS="
 if "%B_EXAMPLE%"=="fatfs" (
     echo       Compiling FatFS ...
-    !CROSS!gcc !ARCH! !CFLAGS! !INC! -Ithird_party\fatfs -c -o build\ff.o third_party\fatfs\ff.c
+    "!CROSS!gcc" !ARCH! !CFLAGS! !INC! -Ithird_party\fatfs -c -o build\ff.o third_party\fatfs\ff.c
     if errorlevel 1 goto :fail
-    !CROSS!gcc !ARCH! !CFLAGS! !INC! -Ithird_party\fatfs -c -o build\diskio.o third_party\fatfs\diskio.c
+    "!CROSS!gcc" !ARCH! !CFLAGS! !INC! -Ithird_party\fatfs -c -o build\diskio.o third_party\fatfs\diskio.c
     if errorlevel 1 goto :fail
-    set EXTRA_OBJS=build\ff.o build\diskio.o
+    set "EXTRA_OBJS=build\ff.o build\diskio.o"
 )
 
 echo [4/4] Linking %B_EXAMPLE%.uf2 ...
-!CROSS!gcc !ARCH! -T bao1x.ld -nostdlib -nostartfiles -Wl,--gc-sections -o build\%B_EXAMPLE%.elf build\crt0.o build\gpio.o build\uart.o build\pwm.o build\spi.o build\i2c.o build\adc.o build\trng.o build\wdt.o build\rtc.o build\bio.o build\bio_dma.o build\irq.o build\rram.o build\aes.o build\sha.o build\qspi.o build\w25q.o build\stdio.o build\delay.o build\stdlib.o build\sevs_assert_target.o build\main.o !EXTRA_OBJS! -lgcc
+"!CROSS!gcc" !ARCH! -T bao1x.ld -nostdlib -nostartfiles -Wl,--gc-sections -o build\%B_EXAMPLE%.elf build\crt0.o build\gpio.o build\uart.o build\pwm.o build\spi.o build\i2c.o build\adc.o build\trng.o build\wdt.o build\rtc.o build\bio.o build\bio_dma.o build\irq.o build\rram.o build\aes.o build\sha.o build\qspi.o build\w25q.o build\stdio.o build\delay.o build\stdlib.o build\sevs_assert_target.o build\main.o !EXTRA_OBJS! -lgcc
 if errorlevel 1 goto :fail
 
-!CROSS!objcopy -O binary build\%B_EXAMPLE%.elf build\%B_EXAMPLE%.bin
+"!CROSS!objcopy" -O binary build\%B_EXAMPLE%.elf build\%B_EXAMPLE%.bin
 if errorlevel 1 goto :fail
 
 python tools\sign_and_uf2.py build\%B_EXAMPLE%.bin build\%B_EXAMPLE%.uf2 0x60060000 0xa7d76373
 if errorlevel 1 goto :fail
 
 echo.
-!CROSS!size build\%B_EXAMPLE%.elf
+"!CROSS!size" build\%B_EXAMPLE%.elf
 echo.
 echo ============================================
 echo   BUILD SUCCESS: build\%B_EXAMPLE%.uf2
@@ -274,7 +327,7 @@ REM ================================================================
 REM  FLASH
 REM ================================================================
 :do_flash
-set UF2=build\%F_EXAMPLE%.uf2
+set "UF2=build\%F_EXAMPLE%.uf2"
 
 if not exist "%UF2%" (
     echo Error: %UF2% not found. Run "bao build %F_EXAMPLE%" first.
@@ -316,3 +369,5 @@ echo *** FAILED ***
 echo.
 
 :end
+popd >nul
+endlocal
