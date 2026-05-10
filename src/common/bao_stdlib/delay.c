@@ -24,10 +24,20 @@ static void ticktimer_init(void)
  *  @req REQ-DABAO-DELAY-0001 */
 uint64_t millis(void)
 {
+    // Explicit high, low, high to avoid race condition 
     if (!s_ticktimer_initialized) ticktimer_init();
-    uint32_t lo = TICKTIMER_TIME0;
-    uint32_t hi = TICKTIMER_TIME1;
-    return ((uint64_t)hi << 32) | (uint64_t)lo;
+    
+    uint32_t hi_a;
+    uint32_t lo;
+    uint32_t hi_b;
+
+    do {
+        hi_a = TICKTIMER_TIME1;
+        lo   = TICKTIMER_TIME0;
+        hi_b = TICKTIMER_TIME1;
+    } while (hi_a != hi_b);
+
+    return ((uint64_t)hi_b << 32) | (uint64_t)lo;
 }
 
 /** @brief Delay ms.
