@@ -77,6 +77,9 @@ uint32_t gpio_get_all(uint port);
 /* Set output direction for multiple pins using a bitmask. 1 = output. */
 void gpio_set_dir_masked(uint port, uint32_t mask);
 
+/* Return true if the pin is currently configured as output. */
+bool gpio_get_dir(uint port, uint pin);
+
 #ifdef __cplusplus
 }
 #endif
