@@ -65,6 +65,9 @@ void gpio_pull_up(uint port, uint pin);
 /* Disable the pull-up resistor. */
 void gpio_disable_pulls(uint port, uint pin);
 
+/* Return true if the internal pull-up resistor is enabled. */
+bool gpio_get_pull(uint port, uint pin);
+
 /* Enable or disable the Schmitt trigger on an input pin. */
 void gpio_set_schmitt(uint port, uint pin, bool enable);
 
