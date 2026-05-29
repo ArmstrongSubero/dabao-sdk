@@ -175,6 +175,19 @@ void gpio_disable_pulls(uint port, uint pin)
     *reg &= ~(1 << pin);
 }
 
+/** @brief Return true if the pull-up resistor is enabled.
+ *  @param[in] port GPIO port (0-5).
+ *  @param[in] pin  Pin number within port (0-15).
+ *  @return true if pull-up is enabled, false otherwise.
+ *  @req REQ-DABAO-GPIO-0014 */
+bool gpio_get_pull(uint port, uint pin)
+{
+    SEVS_ASSERT(port < GPIO_NUM_PORTS);
+    SEVS_ASSERT(pin <= GPIO_MAX_PIN);
+    volatile uint32_t *reg = s_gpiopu_reg(port);
+    return (*reg >> pin) & 1;
+}
+
 /** @brief Enable or disable the Schmitt trigger on a pin.
  *  @param[in] port   GPIO port (0-5).
  *  @param[in] pin    Pin number within port (0-15).
@@ -223,4 +236,17 @@ void gpio_set_dir_masked(uint port, uint32_t mask)
     SEVS_ASSERT(port < GPIO_NUM_PORTS);
     volatile uint32_t *reg = s_gpiooe_reg(port);
     *reg = mask;
+}
+
+/** @brief Return true if a pin is configured as output.
+ *  @param[in] port GPIO port (0-5).
+ *  @param[in] pin  Pin number within port (0-15).
+ *  @return true if pin is output, false if input.
+ *  @req REQ-DABAO-GPIO-0013 */
+bool gpio_get_dir(uint port, uint pin)
+{
+    SEVS_ASSERT(port < GPIO_NUM_PORTS);
+    SEVS_ASSERT(pin <= GPIO_MAX_PIN);
+    volatile uint32_t *reg = s_gpiooe_reg(port);
+    return (*reg >> pin) & 1;
 }

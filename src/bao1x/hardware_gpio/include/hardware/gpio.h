@@ -65,6 +65,9 @@ void gpio_pull_up(uint port, uint pin);
 /* Disable the pull-up resistor. */
 void gpio_disable_pulls(uint port, uint pin);
 
+/* Return true if the internal pull-up resistor is enabled. */
+bool gpio_get_pull(uint port, uint pin);
+
 /* Enable or disable the Schmitt trigger on an input pin. */
 void gpio_set_schmitt(uint port, uint pin, bool enable);
 
@@ -76,6 +79,9 @@ uint32_t gpio_get_all(uint port);
 
 /* Set output direction for multiple pins using a bitmask. 1 = output. */
 void gpio_set_dir_masked(uint port, uint32_t mask);
+
+/* Return true if the pin is currently configured as output. */
+bool gpio_get_dir(uint port, uint pin);
 
 #ifdef __cplusplus
 }
