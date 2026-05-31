@@ -29,6 +29,7 @@ chmod +x bao_flash.sh
 
 - **Python 3:** Required for UF2 signing and serial flashing
 - **pyserial:** `pip install pyserial`
+- **pure25519:** `pip install pure25519`
 - **USB-serial adapter:** PB14 (TX), PB13 (RX), 115200 baud for serial output
 
 ### Toolchain Setup
