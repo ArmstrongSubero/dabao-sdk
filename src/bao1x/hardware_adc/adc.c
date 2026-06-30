@@ -161,5 +161,5 @@ uint32_t adc_raw_to_mv(uint32_t raw)
     if (raw == 0) {
         return 0;
     }
-    return (ADC_VREF_MV * ADC_MAX_VALUE) / raw;
+    return (raw * ADC_VREF_MV) / ADC_MAX_VALUE;
 }
