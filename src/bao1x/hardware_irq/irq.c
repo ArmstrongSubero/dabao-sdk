@@ -42,7 +42,10 @@ static const uint32_t irq_array_base[20] = {
 #define IRQ_EV_PENDING      0x10
 #define IRQ_EV_ENABLE       0x14
 
-/* Callback table: 20 IRQ arrays + slots 20-29 unused + slot 30 for Timer0 */
+/*
+ * Callback table: 20 IRQ arrays, slot 20 for TickTimer,
+ * slots 21-29 unused, slot 30 for Timer0.
+ */
 #define IRQ_TABLE_SIZE      31
 static irq_handler_t irq_handlers[IRQ_TABLE_SIZE];
 
@@ -54,6 +57,19 @@ static inline uint32_t csr_read_mim(void) {
 
 static inline void csr_write_mim(uint32_t val) {
     __asm__ volatile ("csrw 0xBC0, %0" :: "r"(val));
+}
+
+/*
+ * Atomic set/clear of MIM bits. csrrs/csrrc are single instructions,
+ * so an interrupt cannot land between a read and a write and lose
+ * the update. Do not replace these with read-modify-write.
+ */
+static inline void csr_set_mim(uint32_t mask) {
+    __asm__ volatile ("csrrs zero, 0xBC0, %0" :: "r"(mask));
+}
+
+static inline void csr_clear_mim(uint32_t mask) {
+    __asm__ volatile ("csrrc zero, 0xBC0, %0" :: "r"(mask));
 }
 
 static inline uint32_t csr_read_mip_vex(void) {
@@ -83,7 +99,7 @@ void irq_init(void)
 }
 
 /** @brief Register a callback for an IRQ source.
- *  @param[in] irq_no IRQ source number (0-19 for arrays, 30 for Timer0).
+ *  @param[in] irq_no IRQ source number (0-19 arrays, 20 TickTimer, 30 Timer0).
  *  @param[in] handler Callback function, or NULL to unregister.
  *  @req REQ-DABAO-IRQ-0002 */
 void irq_set_handler(uint32_t irq_no, irq_handler_t handler)
@@ -100,7 +116,11 @@ void irq_enable(uint32_t irq_no)
 {
     SEVS_ASSERT(irq_no <= 30);
 
-    /* Enable all event bits in the IRQ array */
+    /*
+     * Enable all event bits in the IRQ array. Sources 20 (TickTimer)
+     * and 30 (Timer0) are not arrays; their event enables live in
+     * their own peripheral registers.
+     */
     if (irq_no < 20) {
         volatile uint32_t *ev_enable =
             (volatile uint32_t *)(irq_array_base[irq_no] + IRQ_EV_ENABLE);
@@ -108,7 +128,7 @@ void irq_enable(uint32_t irq_no)
     }
 
     /* Enable this IRQ line in the VexRiscv MIM register */
-    csr_write_mim(csr_read_mim() | (1 << irq_no));
+    csr_set_mim(1u << irq_no);
 }
 
 /** @brief Enable specific event bits within an IRQ array.
@@ -125,7 +145,7 @@ void irq_enable_events(uint32_t irq_no, uint32_t event_mask)
     }
 
     /* Enable this IRQ line in MIM */
-    csr_write_mim(csr_read_mim() | (1 << irq_no));
+    csr_set_mim(1u << irq_no);
 }
 
 /** @brief Disable an IRQ source in the MIM register.
@@ -135,7 +155,7 @@ void irq_disable(uint32_t irq_no)
 {
     SEVS_ASSERT(irq_no <= 30);
 
-    csr_write_mim(csr_read_mim() & ~(1 << irq_no));
+    csr_clear_mim(1u << irq_no);
 }
 
 /*
@@ -154,10 +174,27 @@ void trap_dispatch(void)
         /* Machine external interrupt */
         uint32_t pending = csr_read_mip_vex();
 
-        /* Check Timer0 (bit 30) */
-        if ((pending & (1 << 30)) && irq_handlers[30]) {
+        /*
+         * Check Timer0 (bit 30).
+         * The pending bit is cleared unconditionally. If it were only
+         * cleared when a handler exists, enabling the IRQ without
+         * registering a handler would leave the line asserted and the
+         * CPU would re-enter this function forever.
+         */
+        if (pending & (1u << 30)) {
             TIMER0_EV_PENDING = 1;
-            irq_handlers[30](1);
+            if (irq_handlers[30])
+                irq_handlers[30](1);
+        }
+
+        /*
+         * Check TickTimer (bit 20). Not an IRQ array, so it needs its
+         * own case exactly like Timer0 above.
+         */
+        if (pending & (1u << 20)) {
+            TICKTIMER_EV_PENDING = 1;
+            if (irq_handlers[20])
+                irq_handlers[20](1);
         }
 
         /* Check IRQ arrays 0-19 */

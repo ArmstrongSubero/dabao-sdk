@@ -54,6 +54,7 @@ extern "C" {
 #define IRQ_ARRAY17    17   /* I2C1, BIO, QFC, ADC, IOX dupes */
 #define IRQ_ARRAY18    18   /* BIO, I2C2, I2C NACK/err dupes */
 #define IRQ_ARRAY19    19   /* Mailbox, BIO, SDIO dupes */
+#define IRQ_TICKTIMER  20
 #define IRQ_TIMER0     30
 
 /*

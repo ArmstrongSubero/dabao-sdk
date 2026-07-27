@@ -7,7 +7,7 @@
  * The chip has 4 PWM slices (0-3), each with 4 channels (0-3).
  * On the Dabao board:
  *   Slice 1: PB0(ch0), PB1(ch1), PB2(ch2), PB3(ch3) via AF3
- *   Slice 2: PC0(ch0), PC1(ch1), PC2(ch2), PC3(ch3) via AF1
+ *   Slice 2: PC0(ch0), PC1(ch1), PC2(ch2), PC3(ch3) via AF3
  */
 
 #ifndef _HARDWARE_PWM_H
@@ -42,7 +42,7 @@ uint16_t pwm_get_period(uint slice);
  * Convenience: set up a GPIO pin for PWM output.
  * Configures the alternate function and output enable.
  * For PB1: pwm_init_pin(GPIO_PORT_B, 1) sets AF3.
- * For PC0: pwm_init_pin(GPIO_PORT_C, 0) sets AF1.
+ * For PC0: pwm_init_pin(GPIO_PORT_C, 0) sets AF3.
  */
 void pwm_init_pin(uint port, uint pin);
 

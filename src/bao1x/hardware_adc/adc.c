@@ -158,8 +158,9 @@ uint32_t adc_raw_to_mv(uint32_t raw)
 {
     SEVS_ASSERT(ADC_VREF_MV > 0);
     SEVS_ASSERT(ADC_MAX_VALUE > 0);
-    if (raw == 0) {
-        return 0;
-    }
+    /*
+     * mV = raw * Vref / full_scale.  Matches the reference manual:
+     * VIN = dout / 1023 * Vbg.
+     */
     return (raw * ADC_VREF_MV) / ADC_MAX_VALUE;
 }

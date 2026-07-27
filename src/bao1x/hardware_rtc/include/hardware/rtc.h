@@ -19,6 +19,14 @@ extern "C" {
 /* Initialize the RTC with the 1 Hz divider. */
 void rtc_init(void);
 
+/*
+ * Set the RTC divider directly. 14-bit field; higher bits are masked off.
+ * Tick rate is F_raw / (div + 1), where F_raw is the internal RC
+ * oscillator after its fixed /32. Do not use div = 0: it is a special
+ * case that does not follow the formula.
+ */
+void rtc_set_divider(uint32_t div);
+
 /* Start the RTC counter. */
 void rtc_start(void);
 

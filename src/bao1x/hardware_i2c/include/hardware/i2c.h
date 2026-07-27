@@ -71,6 +71,18 @@ void i2c_async_wait(uint instance);
 void i2c_async_read(uint instance, uint8_t *dst, uint32_t len);
 
 /* I2C command opcodes (for building custom sequences) */
+/*
+ * Maximum payload per transaction. The driver stages data through
+ * fixed IFRAM buffers of this size; longer transfers must be split.
+ */
+#define I2C_MAX_XFER        64
+
+/* Return codes for the blocking transfer functions. */
+#define I2C_OK               0
+#define I2C_ERR_LEN        (-1)   /* length exceeds I2C_MAX_XFER */
+#define I2C_ERR_TIMEOUT    (-2)   /* DMA channel never went idle   */
+#define I2C_ERR_NACK       (-3)   /* slave did not acknowledge     */
+
 #define I2C_CMD_SHIFT       28
 #define I2C_CMD_CFG_ID      0x0E
 #define I2C_CMD_START_ID    0x00

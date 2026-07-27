@@ -83,7 +83,7 @@ static uint32_t detect_perclk(void)
         return div * 1000000UL;
     }
 
-    return 175000000UL;
+    return 99000000UL;   /* perclk is 99 MHz on the Baochip-1x */
 }
 
 /**

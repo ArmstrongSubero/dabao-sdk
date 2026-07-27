@@ -11,19 +11,51 @@
 #include "sevs_runtime.h"
 
 /*
- * WDT clock is derived from the core clock via the fdpclk divider.
- * Empirically measured countdown rate: ~11.4 MHz on Dabao hardware.
- * (0x0FFFFFFA - 0x0FA90F8C = 0x0056F06E ticks per 500 ms interval.)
+ * The WDT counts on PCLK, which is ACLK / 8 = 43.75 MHz.
+ *
+ * Measured on Dabao hardware over a TickTimer-timed 2000 ms window:
+ * 87,500,245 ticks, giving 43,750,122 Hz. That is PCLK to within
+ * 3 ppm, so the counter is clocked directly from PCLK with no
+ * further division.
+ *
+ * An earlier constant of 11,395,000 came from a measurement whose
+ * timebase was wrong by the same 3.84x factor. Loading from it made
+ * every timeout roughly a quarter of what the caller asked for.
  */
-#define WDT_CLK_HZ     11395000
+#define WDT_CLK_HZ     (ACLK_HZ / 8)
 
-/** @brief Start the watchdog timer with a millisecond timeout.
- *  @param[in] timeout_ms Timeout in milliseconds (must be > 0).
+/*
+ * Longest timeout the 32-bit counter can express at this rate.
+ * 2^32 / 43750 ticks per ms = 98,146 ms.
+ */
+#define WDT_MAX_TIMEOUT_MS  98000u
+
+/** @brief Start the watchdog timer.
+ *
+ *  This is an ARM PrimeCell SP805, which escalates in two stages:
+ *  the counter reaching zero raises an interrupt and reloads, and
+ *  reaching zero a second time with that interrupt still pending
+ *  asserts the chip reset.
+ *
+ *  timeout_ms is therefore the FEED DEADLINE, not the time to reset.
+ *  Feed within timeout_ms and nothing happens. Miss it once and you
+ *  get an interrupt plus one more full period to recover. Miss it
+ *  twice and the chip resets, at 2 * timeout_ms from the last feed.
+ *
+ *  @param[in] timeout_ms Feed deadline in milliseconds (must be > 0).
+ *                        Reset occurs at twice this value.
  *  @req REQ-DABAO-WDT-0001 */
 void wdt_start(uint32_t timeout_ms)
 {
     SEVS_ASSERT(timeout_ms > 0);
-    uint32_t load_value = (WDT_CLK_HZ / 1000) * timeout_ms;
+
+    /* Clamp before multiplying: (WDT_CLK_HZ / 1000) * timeout_ms
+     * overflows 32 bits above about 98 seconds. */
+    if (timeout_ms > WDT_MAX_TIMEOUT_MS) {
+        timeout_ms = WDT_MAX_TIMEOUT_MS;
+    }
+
+    uint32_t load_value = (WDT_CLK_HZ / 1000u) * timeout_ms;
     if (load_value == 0) {
         load_value = 1;
     }

@@ -235,7 +235,8 @@ void gpio_set_dir_masked(uint port, uint32_t mask)
 {
     SEVS_ASSERT(port < GPIO_NUM_PORTS);
     volatile uint32_t *reg = s_gpiooe_reg(port);
-    *reg = mask;
+    /* Set the pins in mask to output, leave the others untouched. */
+    *reg |= mask;
 }
 
 /** @brief Return true if a pin is configured as output.

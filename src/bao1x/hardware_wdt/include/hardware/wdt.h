@@ -16,7 +16,15 @@
 extern "C" {
 #endif
 
-/* Start the watchdog with a timeout in milliseconds (approximate). */
+/*
+ * Start the watchdog.
+ *
+ * timeout_ms is the FEED DEADLINE. The SP805 escalates in two stages:
+ * the first expiry raises an interrupt and reloads, the second asserts
+ * reset. So the chip resets at 2 * timeout_ms after the last feed.
+ *
+ * Maximum is about 98 seconds; larger values are clamped.
+ */
 void wdt_start(uint32_t timeout_ms);
 
 /* Start the watchdog with a raw countdown value (clock cycles). */
