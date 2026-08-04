@@ -57,14 +57,6 @@ int main(void)
     mini_printf("SR1: 0x%02x  SR2: 0x%02x\r\n",
                 w25q_read_sr1(), w25q_read_sr2());
 
-    /* Enable quad mode */
-    mini_printf("\r\nEnabling quad mode... ");
-    rc = w25q_enable_quad();
-    if (rc == 0)
-        mini_printf("OK (SR2: 0x%02x)\r\n", w25q_read_sr2());
-    else
-        mini_printf("FAILED (%d)\r\n", rc);
-
     /* Erase test sector */
     mini_printf("\r\nErasing sector at 0x%06x... ", TEST_ADDR);
     rc = w25q_erase_sector(TEST_ADDR);

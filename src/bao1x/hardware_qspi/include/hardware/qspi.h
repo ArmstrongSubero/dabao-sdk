@@ -112,6 +112,24 @@ bool qspi_busy(uint instance);
  */
 void qspi_wait(uint instance);
 
+/*
+ * Report whether a bounded wait on this instance has expired.
+ *
+ * Every wait loop in this driver is bounded so a hung device cannot lock
+ * the CPU. If a loop exhausts, the transfer did not complete and this
+ * returns true. The flag is sticky until cleared.
+ *
+ *   qspi_clear_timeout(1);
+ *   qspi_read_blocking(1, buf, 3, false);
+ *   if (qspi_timed_out(1)) { ... device did not respond ... }
+ */
+bool qspi_timed_out(uint instance);
+
+/*
+ * Clear the timeout flag. Also cleared by qspi_init().
+ */
+void qspi_clear_timeout(uint instance);
+
 /* ------------------------------------------------------------------ */
 /* UDMA SPI command builder macros                                     */
 /*                                                                     */

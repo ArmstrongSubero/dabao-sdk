@@ -120,10 +120,14 @@ uint8_t w25q_read_sr1(void);
  */
 uint8_t w25q_read_sr2(void);
 
+
 /*
- * Enable quad I/O mode by setting the QE bit in status register 2.
- * Once enabled, quad-mode reads and writes use all 4 data lines.
- * Returns 0 on success, negative on failure.
+ * Enable quad SPI mode.
+ *
+ * NOT CURRENTLY SUPPORTED. Quad output fast read (0x6B) returns corrupted
+ * data past roughly the first 13 bytes on the Dabao. Single line read and
+ * all write and erase operations are unaffected and verified working.
+ * This returns BAO_ERROR until the quad read path is fixed.
  */
 int w25q_enable_quad(void);
 

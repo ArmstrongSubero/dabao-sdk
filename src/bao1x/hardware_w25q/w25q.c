@@ -43,6 +43,14 @@ static uint  s_instance;
 static uint8_t s_cs;
 static bool  s_quad_enabled;
 
+/*
+ * Sticky flag set when w25q_wait_busy() exhausts its bound. That function
+ * returns void, so this is the only way a caller can tell that the flash
+ * was still busy when the wait gave up. Cleared by w25q_init() and by
+ * w25q_clear_timeout().
+ */
+static bool  s_wait_timeout;
+
 static void w25q_cs_begin(void)
 {
 
@@ -75,16 +83,21 @@ static void w25q_send_addr(uint32_t addr)
 
 static int w25q_wait_wip(void)
 {
-
-    /* Poll SR1 until BUSY clears */
-    uint32_t timeout = 0;
-    for (int s_poll = 0; s_poll < 1000000 && (w25q_read_sr1() & W25Q_SR1_BUSY); s_poll++)
+    /*
+     * Poll SR1 until BUSY clears.
+     *
+     * The loop is bounded so a hung flash cannot lock the CPU. Exhausting
+     * the bound means the operation did not finish, which must be reported
+     * as a timeout rather than as success: callers use the return value to
+     * decide whether a program or erase completed.
+     */
+    int s_poll;
+    for (s_poll = 0; s_poll < 1000000; s_poll++)
     {
-        timeout++;
-        if (timeout > 10000000)
-            return BAO_ERROR_TIMEOUT;
+        if (!(w25q_read_sr1() & W25Q_SR1_BUSY))
+            return BAO_OK;
     }
-    return BAO_OK;
+    return BAO_ERROR_TIMEOUT;
 }
 
 /** @brief Initialize the W25Q flash: reset the chip and verify JEDEC ID.
@@ -96,10 +109,14 @@ static int w25q_wait_wip(void)
 int w25q_init(uint instance, uint8_t cs, uint8_t clkdiv)
 {
     SEVS_ASSERT(W25Q_PAGE_SIZE == 256);
+    SEVS_ASSERT(instance <= 3);
+
+    if (instance > 3) return BAO_ERROR;
 
     s_instance = instance;
     s_cs = cs;
     s_quad_enabled = false;
+    s_wait_timeout = false;
 
     qspi_init(instance, clkdiv);
 
@@ -136,8 +153,7 @@ int w25q_init(uint instance, uint8_t cs, uint8_t clkdiv)
  *  @req REQ-DABAO-W25Q-0002 */
 void w25q_read_id(uint8_t *mfr, uint8_t *dev)
 {
-    SEVS_REQUIRE_NOT_NULL(mfr);
-    SEVS_REQUIRE_NOT_NULL(dev);
+    /* Either pointer may be NULL to skip that byte. */
     uint8_t cmd_addr[3] = { 0x00, 0x00, 0x00 };
     uint8_t id[2];
 
@@ -204,15 +220,55 @@ bool w25q_is_busy(void)
  *  @req REQ-DABAO-W25Q-0010 */
 void w25q_wait_busy(void)
 {
-    for (int s_poll = 0; s_poll < 1000000 && (w25q_is_busy()); s_poll++) { /* bounded poll */ }
+    int s_poll;
+    for (s_poll = 0; s_poll < 1000000; s_poll++) {
+        if (!w25q_is_busy())
+            return;
+    }
+    /* Bound exhausted, the flash is still busy. Record it. */
+    s_wait_timeout = true;
+}
+
+/** @brief Report whether w25q_wait_busy() gave up while the flash was busy.
+ *
+ *  w25q_wait_busy() returns void and its poll is bounded, so this is how a
+ *  caller detects that the wait was abandoned rather than satisfied. The
+ *  flag is sticky until cleared.
+ *
+ *  @return true if a bounded wait expired since the last clear.
+ *  @req REQ-DABAO-W25Q-0013 */
+bool w25q_timed_out(void)
+{
+    return s_wait_timeout;
+}
+
+/** @brief Clear the wait timeout flag. Also cleared by w25q_init().
+ *  @req REQ-DABAO-W25Q-0014 */
+void w25q_clear_timeout(void)
+{
+    s_wait_timeout = false;
 }
 
 /** @brief Enable quad SPI mode by setting the QE bit in Status Register 2.
- *  @return BAO_OK on success, BAO_ERROR if verification fails.
+ *
+ *  NOT CURRENTLY SUPPORTED. Quad output fast read (0x6B) returns corrupted
+ *  data past roughly the first 13 bytes on the Dabao. The cause is not yet
+ *  identified: candidates are the dummy cycle count, the UDMA quad receive
+ *  nibble order, or the RX path not keeping up at 4 bits per clock.
+ *
+ *  Single-line read, and all write and erase operations, are unaffected and
+ *  verified working on hardware.
+ *
+ *  This returns BAO_ERROR without touching the device so that s_quad_enabled
+ *  is never set and w25q_read() stays on the single-line path.
+ *
+ *  @return BAO_ERROR always.
  *  @req REQ-DABAO-W25Q-0007 */
 int w25q_enable_quad(void)
 {
+    return BAO_ERROR;
 
+#if 0   /* re-enable once the quad read path is verified on hardware */
     uint8_t sr2 = w25q_read_sr2();
 
     if (sr2 & W25Q_SR2_QE)
@@ -241,6 +297,7 @@ int w25q_enable_quad(void)
 
     s_quad_enabled = true;
     return BAO_OK;
+#endif
 }
 
 /** @brief Read data from flash using standard or quad output mode.

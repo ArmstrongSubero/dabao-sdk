@@ -38,7 +38,18 @@ static const uint32_t spim_cg[] = {
     UDMA_CG_SPIM3,
 };
 
-static uint8_t qspi_clkdiv[4];
+/*
+ * Per-instance timeout flag.
+ *
+ * Every wait loop in this driver is bounded rather than infinite, which is
+ * deliberate: a hung device must not lock the CPU. The cost is that an
+ * exhausted loop used to return normally, so a caller could not tell a
+ * completed transfer from an abandoned one.
+ *
+ * Any bounded loop that exhausts now sets this flag. Call qspi_timed_out()
+ * after a transfer to check, and qspi_clear_timeout() to reset it.
+ */
+static bool qspi_timeout[4];
 
 static inline volatile uint32_t *qreg(uint inst, uint offset)
 {
@@ -47,18 +58,38 @@ static inline volatile uint32_t *qreg(uint inst, uint offset)
 
 static void qspi_wait_cmd(uint inst)
 {
+    if (inst > 3) return;
 
-    for (int s_poll = 0; s_poll < 1000000 && (*qreg(inst, UDMA_CMD_CFG_OFFSET) & UDMA_CFG_EN); s_poll++) { /* bounded poll */ }
+    int s_poll;
+    for (s_poll = 0; s_poll < 1000000; s_poll++) {
+        if (!(*qreg(inst, UDMA_CMD_CFG_OFFSET) & UDMA_CFG_EN))
+            return;
+    }
+    qspi_timeout[inst] = true;
 }
 
 static void qspi_wait_tx(uint inst)
 {
-    for (int s_poll = 0; s_poll < 1000000 && (*qreg(inst, UDMA_TX_CFG_OFFSET) & UDMA_CFG_EN); s_poll++) { /* bounded poll */ }
+    if (inst > 3) return;
+
+    int s_poll;
+    for (s_poll = 0; s_poll < 1000000; s_poll++) {
+        if (!(*qreg(inst, UDMA_TX_CFG_OFFSET) & UDMA_CFG_EN))
+            return;
+    }
+    qspi_timeout[inst] = true;
 }
 
 static void qspi_wait_rx(uint inst)
 {
-    for (int s_poll = 0; s_poll < 1000000 && (*qreg(inst, UDMA_RX_CFG_OFFSET) & UDMA_CFG_EN); s_poll++) { /* bounded poll */ }
+    if (inst > 3) return;
+
+    int s_poll;
+    for (s_poll = 0; s_poll < 1000000; s_poll++) {
+        if (!(*qreg(inst, UDMA_RX_CFG_OFFSET) & UDMA_CFG_EN))
+            return;
+    }
+    qspi_timeout[inst] = true;
 }
 
 /** @brief Initialize a QSPI master instance, configure pins and clock divider.
@@ -71,7 +102,7 @@ void qspi_init(uint instance, uint8_t clkdiv)
 
     if (instance > 3) return;
 
-    qspi_clkdiv[instance] = clkdiv;
+    qspi_timeout[instance] = false;
 
     /* Open UDMA clock gate */
     REG32(UDMA_CTRL_BASE) |= spim_cg[instance];
@@ -223,7 +254,8 @@ void qspi_write_blocking(uint instance, const uint8_t *data,
     SEVS_REQUIRE_NOT_NULL(data);
     if (instance > 3 || len == 0) return;
 
-    for (int s_guard = 0; s_guard < 100000 && (len > 0); s_guard++)
+    int s_guard;
+    for (s_guard = 0; s_guard < 100000 && (len > 0); s_guard++)
     {
         uint32_t chunk = (len > 256) ? 256 : len;
 
@@ -251,6 +283,9 @@ void qspi_write_blocking(uint instance, const uint8_t *data,
         data += chunk;
         len  -= chunk;
     }
+
+    if (len > 0)
+        qspi_timeout[instance] = true;   /* guard exhausted, transfer incomplete */
 }
 
 /** @brief Receive data over QSPI, blocking until complete.
@@ -265,7 +300,8 @@ void qspi_read_blocking(uint instance, uint8_t *data,
     SEVS_REQUIRE_NOT_NULL(data);
     if (instance > 3 || len == 0) return;
 
-    for (int s_guard = 0; s_guard < 100000 && (len > 0); s_guard++)
+    int s_guard;
+    for (s_guard = 0; s_guard < 100000 && (len > 0); s_guard++)
     {
         uint32_t chunk = (len > 256) ? 256 : len;
 
@@ -298,6 +334,9 @@ void qspi_read_blocking(uint instance, uint8_t *data,
         data += chunk;
         len  -= chunk;
     }
+
+    if (len > 0)
+        qspi_timeout[instance] = true;   /* guard exhausted, transfer incomplete */
 }
 
 /** @brief Check whether a QSPI transfer is in progress.
@@ -322,5 +361,41 @@ void qspi_wait(uint instance)
 {
     SEVS_ASSERT(instance <= 3);
 
-    for (int s_poll = 0; s_poll < 1000000 && (qspi_busy(instance)); s_poll++) { /* bounded poll */ }
+    if (instance > 3) return;
+
+    int s_poll;
+    for (s_poll = 0; s_poll < 1000000; s_poll++) {
+        if (!qspi_busy(instance))
+            return;
+    }
+    qspi_timeout[instance] = true;
+}
+
+/** @brief Report whether any bounded wait on this instance has expired.
+ *
+ *  Every wait loop in this driver is bounded so a hung device cannot lock
+ *  the CPU. When a loop exhausts, the transfer did not complete and this
+ *  returns true. The flag is sticky: it stays set until cleared by
+ *  qspi_clear_timeout() or by a fresh qspi_init().
+ *
+ *  @param[in] instance SPI master index (0-3).
+ *  @return true if a bounded wait expired since the last clear.
+ *  @req REQ-DABAO-QSPI-0012 */
+bool qspi_timed_out(uint instance)
+{
+    SEVS_ASSERT(instance <= 3);
+
+    if (instance > 3) return false;
+    return qspi_timeout[instance];
+}
+
+/** @brief Clear the timeout flag for an instance.
+ *  @param[in] instance SPI master index (0-3).
+ *  @req REQ-DABAO-QSPI-0013 */
+void qspi_clear_timeout(uint instance)
+{
+    SEVS_ASSERT(instance <= 3);
+
+    if (instance > 3) return;
+    qspi_timeout[instance] = false;
 }
