@@ -6,7 +6,7 @@
  * Base address: PWM_BASE (0x50120000)
  *
  * The chip has 4 PWM slices (PWM0-PWM3), each with 4 output channels.
- * PWM1 channels map to PB0-PB3 (AF3). PWM2 channels map to PC0-PC3 (AF1).
+ * PWM1 channels map to PB0-PB3 (AF3). PWM2 channels map to PC0-PC3 (AF3).
  */
 
 #ifndef _HARDWARE_REGS_PWM_H

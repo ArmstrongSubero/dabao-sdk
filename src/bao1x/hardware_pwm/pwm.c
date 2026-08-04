@@ -35,11 +35,10 @@ void pwm_init_pin(uint port, uint pin)
      * Both PWM1 (PB0-PB3) and PWM2 (PC0-PC3) use AF3.
      * Verified in working main_multi_pwm.c.
      */
-    if (port == GPIO_PORT_B && pin <= 3)
-        gpio_set_function(port, pin, GPIO_FUNC_AF3);
-    else if (port == GPIO_PORT_C && pin <= 3)
-        gpio_set_function(port, pin, GPIO_FUNC_AF3);
+    if ((port != GPIO_PORT_B && port != GPIO_PORT_C) || pin > 3)
+        return;
 
+    gpio_set_function(port, pin, GPIO_FUNC_AF3);
     gpio_set_dir(port, pin, true);
 }
 
@@ -52,6 +51,10 @@ uint16_t pwm_init(uint slice, uint32_t freq_hz)
 {
     SEVS_ASSERT(slice <= 3);
     SEVS_ASSERT(freq_hz > 0);
+
+    /* Runtime guards: asserts may be compiled out in a release build. */
+    if (slice > 3) return 0;
+    if (freq_hz == 0) return 0;
 
     /*
      * CLKSEL=0 selects PCLK (43.75 MHz). The PREFD register is not
@@ -76,14 +79,26 @@ uint16_t pwm_init(uint slice, uint32_t freq_hz)
      * Start with prescaler=0 (divide by 1). If period exceeds 16 bits,
      * increase the prescaler until it fits.
      */
-    uint32_t prescaler = 0;
-    uint32_t period;
+    uint32_t prescaler;
+    uint32_t period = 0;
     for (prescaler = 0; prescaler < 256; prescaler++) {
         period = (pwm_clk / (prescaler + 1)) / freq_hz;
         if (period <= 65535) break;
     }
 
-    if (period > 65535) period = 65535;
+    /*
+     * If the loop ran to completion, prescaler is 256 on exit. The PRESC
+     * field is 8 bits, so writing 256 truncates to 0 and selects the
+     * fastest divider instead of the slowest. Clamp to the slowest
+     * settings the hardware can actually produce.
+     *
+     * Slowest reachable frequency is PCLK / 256 / 65535, about 2.61 Hz.
+     */
+    if (prescaler > 255) {
+        prescaler = 255;
+        period = 65535;
+    }
+
     if (period == 0) period = 1;
 
     slice_period[slice] = (uint16_t)period;
@@ -129,6 +144,8 @@ void pwm_set_duty(uint slice, uint channel, uint16_t duty)
     SEVS_ASSERT(slice <= 3);
     SEVS_ASSERT(channel <= 3);
 
+    if (slice > 3 || channel > 3) return;
+
     if (duty > slice_period[slice])
         duty = slice_period[slice];
 
@@ -147,6 +164,8 @@ void pwm_set_percent(uint slice, uint channel, uint32_t percent)
     SEVS_ASSERT(slice <= 3);
     SEVS_ASSERT(channel <= 3);
 
+    if (slice > 3 || channel > 3) return;
+
     if (percent > 100) percent = 100;
     uint16_t duty = (uint16_t)((uint32_t)slice_period[slice] * percent / 100);
     pwm_set_duty(slice, channel, duty);
@@ -159,6 +178,8 @@ void pwm_stop(uint slice)
 {
     SEVS_ASSERT(slice <= 3);
 
+    if (slice > 3) return;
+
     *pwm_reg(slice, PWM_CMD_OFFSET) = PWM_CMD_STOP;
 }
 
@@ -169,6 +190,8 @@ void pwm_stop(uint slice)
 uint16_t pwm_get_period(uint slice)
 {
     SEVS_ASSERT(slice <= 3);
+
+    if (slice > 3) return 0;
 
     return slice_period[slice];
 }
