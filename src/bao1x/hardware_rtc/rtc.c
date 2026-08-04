@@ -24,7 +24,7 @@
  * Dabao hardware at roughly 11,985 Hz, so the oscillator runs near
  * 384 kHz, not the nominal 32 kHz. It varies per chip and drifts
  * with temperature, so a fixed divider cannot give an accurate
- * 1 Hz tick. Call rtc_calibrate() instead.
+ * 1 Hz tick.
  *
  * CLK1HZ_FD = 0 is a special case and does NOT mean divide by one.
  * It measures about 0.7x the rate the formula predicts, so do not
@@ -44,10 +44,14 @@ void rtc_set_divider(uint32_t div)
     memory_fence();
 }
 
+
 /** @brief Initialize the RTC.
  *
- *  Leaves the boot divider in place. The RTC will not tick at 1 Hz
- *  until rtc_calibrate() has run; see the note above.
+ *  Leaves the boot divider in place, so the RTC will not tick at 1 Hz.
+ *  The 32 kHz source is an RC oscillator that runs near 384 kHz on the
+ *  Dabao and varies per chip, so an accurate tick requires measuring the
+ *  raw rate on your own board and writing the result to AON_CLK1HZ_FD
+ *  with rtc_set_divider(). See the note at the top of this file.
  *  @req REQ-DABAO-RTC-0002 */
 void rtc_init(void)
 {

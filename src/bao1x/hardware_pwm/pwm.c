@@ -33,7 +33,7 @@ void pwm_init_pin(uint port, uint pin)
 
     /*
      * Both PWM1 (PB0-PB3) and PWM2 (PC0-PC3) use AF3.
-     * Verified in working main_multi_pwm.c.
+     * Verified working on harware tests.
      */
     if ((port != GPIO_PORT_B && port != GPIO_PORT_C) || pin > 3)
         return;

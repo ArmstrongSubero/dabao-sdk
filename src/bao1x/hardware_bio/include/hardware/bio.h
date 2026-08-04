@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Armstrong Subero
  * SPDX-License-Identifier: Apache-2.0
  *
- * bao_bio.h - BIO Coprocessor Driver for Baochip-1x
+ * bao.h - BIO Coprocessor Driver for Baochip-1x
  *
  * Bare metal C driver for the BIO (Bao I/O) coprocessor.
  * The BIO is a cluster of four PicoRV32 RISC-V cores (RV32-EMC)
@@ -21,7 +21,7 @@
  *   - bao1x-hal/src/bio_hw.rs (Rust HAL reference)
  *
  * Usage:
- *   #include "bao_bio.h"
+ *   #include "bio.h"
  *   bio_init(700000000);       // call once at startup with fclk in Hz
  *   bio_load_code(0, code, len);
  *   bio_set_target_freq(0, 1000000);

@@ -1,5 +1,5 @@
 /*
- * bao_bio.c - BIO Coprocessor Driver for Baochip-1x
+ * bio.c - BIO Coprocessor Driver for Baochip-1x
  *
  * Implements the BIO driver API defined in bao_bio.h.
  * See that header for full documentation of each function.

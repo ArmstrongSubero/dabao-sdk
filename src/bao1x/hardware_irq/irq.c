@@ -15,7 +15,7 @@
 #include "hardware/regs/timer.h"
 #include "sevs_runtime.h"
 
-/* IRQ array base addresses (from bao_irq.h) */
+/* IRQ array base addresses (from irq.h) */
 static const uint32_t irq_array_base[20] = {
     0xE0004000,  /*  0: MDMA, BIO */
     0xE0005000,  /*  1: USB */
