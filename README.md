@@ -238,3 +238,10 @@ Then: `bao_flash build your_program`
 ## License
 
 Apache-2.0
+
+
+## Going deeper
+
+The SDK gets you running. If you want the register level detail behind it,
+including the undocumented behaviour, I wrote [The Dabao Book](https://payhip.com/b/EwSZv).
+Thank you for your support!
