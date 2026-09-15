@@ -120,7 +120,7 @@ int bio_init(uint32_t fclk_hz)
      * an assembler, keeping this file self-contained.
      */
     static const uint32_t mem_init[] = {
-        0x0200A023,  /* sw x0, 0x20(x0) */
+        0x02002023,  /* sw x0, 0x20(x0) */
         0x02002283,  /* lw t0, 0x20(x0) */
         0x61200137,  /* lui sp, 0x61200 */
         0xFFC10113,  /* addi sp, sp, -4 */
