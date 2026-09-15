@@ -14,6 +14,10 @@
 
 #include "hardware/bio.h"
 #include "sevs_runtime.h"
+
+#define SFR_CGUFD_CFGFDCR_0_4_0       (*(volatile uint32_t *)(0x40040000 + 0x14))
+#define SYSCTRL_SFR_CGUSET            (*(volatile uint32_t *)(0x40040000 + 0x2c))
+
 /*
  * We store fclk so bio_set_target_freq() can compute dividers.
  * This is the only piece of "state" in the driver.
@@ -30,6 +34,17 @@ int bio_init(uint32_t fclk_hz)
     uint32_t i;
 
     s_fclk_hz = fclk_hz;
+
+    if (fclk_hz > 400000000) {
+        // Put BIO into fast mode
+        SFR_CGUFD_CFGFDCR_0_4_0 = 0x070001ff;
+        SYSCTRL_SFR_CGUSET = 0x32;
+    }
+    else {
+        // Assume <= 400MHz means slow mode
+        SFR_CGUFD_CFGFDCR_0_4_0 = 0x0700017f;
+        SYSCTRL_SFR_CGUSET = 0x32;
+    }
 
     /* Stop all cores */
     BIO_SFR_CTRL = 0x0;
