@@ -15,13 +15,9 @@
 #include "hardware/bio.h"
 #include "sevs_runtime.h"
 
-/*
- * Clock gating unit registers. boot1 leaves BIO running at 350 MHz, and
- * reaching 700 MHz needs the fast mode divider written here before the
- * cores are started.
- */
-#define SFR_CGUFD_CFGFDCR_0_4_0   (*(volatile uint32_t *)(0x40040000 + 0x14))
-#define SYSCTRL_SFR_CGUSET        (*(volatile uint32_t *)(0x40040000 + 0x2c))
+#define SFR_CGUFD_CFGFDCR_0_4_0       (*(volatile uint32_t *)(0x40040000 + 0x14))
+#define SYSCTRL_SFR_CGUSET            (*(volatile uint32_t *)(0x40040000 + 0x2c))
+
 /*
  * We store fclk so bio_set_target_freq() can compute dividers.
  * This is the only piece of "state" in the driver.
@@ -106,19 +102,15 @@ int bio_init(uint32_t fclk_hz)
 
     s_fclk_hz = fclk_hz;
 
-    /*
-     * Select the BIO clock domain before anything else. boot1 hands the
-     * block over at 350 MHz; asking for more than 400 MHz switches the
-     * divider to fast mode. The threshold is a mode selection, not a
-     * rounding: 700 MHz needs fast mode, 350 MHz needs slow, and there
-     * is nothing in between.
-     */
-    if (fclk_hz > 400000000u) {
-        SFR_CGUFD_CFGFDCR_0_4_0 = 0x070001ff;   /* fast mode  */
-        SYSCTRL_SFR_CGUSET      = 0x32;
-    } else {
-        SFR_CGUFD_CFGFDCR_0_4_0 = 0x0700017f;   /* slow mode  */
-        SYSCTRL_SFR_CGUSET      = 0x32;
+    if (fclk_hz > 400000000) {
+        // Put BIO into fast mode
+        SFR_CGUFD_CFGFDCR_0_4_0 = 0x070001ff;
+        SYSCTRL_SFR_CGUSET = 0x32;
+    }
+    else {
+        // Assume <= 400MHz means slow mode
+        SFR_CGUFD_CFGFDCR_0_4_0 = 0x0700017f;
+        SYSCTRL_SFR_CGUSET = 0x32;
     }
 
     /* Stop all cores */
