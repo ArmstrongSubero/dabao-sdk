@@ -1,5 +1,5 @@
 /*
- * diskio.c - FatFs disk I/O layer for Baochip-1x / Dabao Board
+ * diskio.c: FatFs disk I/O layer for Baochip-1x / Dabao Board
  *
  * Ported from PIC16F1718 version by Armstrong Subero.
  * Uses UDMA SPI2 full-duplex transfers instead of byte-at-a-time MSSP.
@@ -7,10 +7,23 @@
  * SPI2 (SPIM2) at 0x50107000, clock gate bit 6
  * Pins: PC0=CLK, PC1=MOSI, PC2=MISO, PC3=CS (all AF2, hardware CS via SOT/EOT)
  * Init at 400 kHz, data at 12.4 MHz (clkdiv=3)
+ *
+ * Every transfer ends with EOT keep_cs set, so CS stays low from the first
+ * command onwards and a command, its token wait and its data block can be
+ * spread over several transfers. The card is the only device on SPI2.
+ * This is the arrangement that was verified on hardware.
+ *
+ * Every wait is bounded. A missing or wedged card makes a call fail with
+ * RES_ERROR or RES_NOTRDY rather than hanging the program. Token and busy
+ * waits are timed with millis(): the SD specification allows a card up to
+ * 100 ms to produce a read data token and up to 250 ms of busy after a
+ * write, and slow cards use most of it.
  */
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "diskio.h"
+#include "bao/stdlib.h"
 
 /* ---- Hardware registers (must match main.c) ---- */
 
@@ -39,12 +52,22 @@
 #define SPI_CMD_TX_DATA (0x6 << 28)
 #define SPI_CMD_EOT     (0x9 << 28)
 #define SPI_CMD_FULL    (0xC << 28)
+#define SPI_EOT_KEEP_CS (1 << 1)
+
+/* ---- Limits ---- */
+
+#define SD_BUF_SIZE         2600u
+#define SD_POLL_LIMIT       1000000
+#define SD_READ_TOKEN_MS    100u
+#define SD_WRITE_BUSY_MS    500u
+#define SD_INIT_MS          1000u
+#define SD_POLL_CHUNK       64u
 
 /* ---- DMA buffers in IFRAM ---- */
 
-static uint8_t  sd_tx_buf[2600] __attribute__((section(".dma_buffers"))) __attribute__((aligned(4)));
-static uint8_t  sd_rx_buf[2600] __attribute__((section(".dma_buffers"))) __attribute__((aligned(4)));
-static uint32_t sd_cmd_buf[8]   __attribute__((section(".dma_buffers"))) __attribute__((aligned(4)));
+static uint8_t  sd_tx_buf[SD_BUF_SIZE] __attribute__((section(".dma_buffers"))) __attribute__((aligned(4)));
+static uint8_t  sd_rx_buf[SD_BUF_SIZE] __attribute__((section(".dma_buffers"))) __attribute__((aligned(4)));
+static uint32_t sd_cmd_buf[8]          __attribute__((section(".dma_buffers"))) __attribute__((aligned(4)));
 
 /* ---- State ---- */
 
@@ -71,64 +94,82 @@ static uint8_t sd_crc7(const uint8_t *data, uint32_t len)
 
 /* ---- Low-level SPI transfer ---- */
 
-static void spi_wait(void)
+static bool spi_wait(void)
 {
-    while (SPI2_CMD_CFG & UDMA_CFG_EN) {}
-    while (SPI2_TX_CFG & UDMA_CFG_EN) {}
-    while (SPI2_RX_CFG & UDMA_CFG_EN) {}
+    for (int s_poll = 0; s_poll < SD_POLL_LIMIT; s_poll++) {
+        if ((SPI2_CMD_CFG & UDMA_CFG_EN) == 0 &&
+            (SPI2_TX_CFG & UDMA_CFG_EN) == 0 &&
+            (SPI2_RX_CFG & UDMA_CFG_EN) == 0)
+            return true;
+    }
+    return false;
 }
 
-/* Full-duplex SPI: send tx_len bytes from sd_tx_buf, receive into sd_rx_buf */
-static void spi_full_duplex(uint32_t len)
+/* Full-duplex SPI: send len bytes from sd_tx_buf, receive into sd_rx_buf.
+   Returns false if the previous or this transfer never completed. */
+static bool spi_full_duplex(uint32_t len)
 {
     uint32_t ci = 0;
+
+    if (len == 0 || len > SD_BUF_SIZE) return false;
+    if (!spi_wait()) return false;
+
     sd_cmd_buf[ci++] = SPI_CMD_CFG | (sd_clkdiv & 0xFF);
     sd_cmd_buf[ci++] = SPI_CMD_SOT | (0 << 0);
     sd_cmd_buf[ci++] = SPI_CMD_FULL | ((8 - 1) << 16) | ((len - 1) & 0xFFFF);
-    sd_cmd_buf[ci++] = SPI_CMD_EOT | (1 << 1);
+    sd_cmd_buf[ci++] = SPI_CMD_EOT | SPI_EOT_KEEP_CS;
+    __asm__ volatile ("fence" ::: "memory");
 
-    spi_wait();
-
-    SPI2_TX_SADDR = (uint32_t)sd_tx_buf;
+    SPI2_TX_SADDR = (uint32_t)(uintptr_t)sd_tx_buf;
     SPI2_TX_SIZE = len;
     SPI2_TX_CFG = UDMA_CFG_EN;
 
-    SPI2_RX_SADDR = (uint32_t)sd_rx_buf;
+    SPI2_RX_SADDR = (uint32_t)(uintptr_t)sd_rx_buf;
     SPI2_RX_SIZE = len;
     SPI2_RX_CFG = UDMA_CFG_EN;
 
-    SPI2_CMD_SADDR = (uint32_t)sd_cmd_buf;
+    SPI2_CMD_SADDR = (uint32_t)(uintptr_t)sd_cmd_buf;
     SPI2_CMD_SIZE = ci * 4;
     SPI2_CMD_CFG = UDMA_CFG_EN | (2 << 1);
-    __asm__ volatile ("fence" ::: "memory");
 
-    spi_wait();
+    if (!spi_wait()) return false;
+    __asm__ volatile ("fence" ::: "memory");
+    return true;
 }
 
 /* TX-only without SOT (for init clocks with CS high) */
-static void spi_tx_no_cs(uint32_t len)
+static bool spi_tx_no_cs(uint32_t len)
 {
     uint32_t ci = 0;
+
+    if (len == 0 || len > SD_BUF_SIZE) return false;
+    if (!spi_wait()) return false;
+
     sd_cmd_buf[ci++] = SPI_CMD_CFG | (sd_clkdiv & 0xFF);
     sd_cmd_buf[ci++] = SPI_CMD_TX_DATA | ((8 - 1) << 16) | ((len - 1) & 0xFFFF);
+    __asm__ volatile ("fence" ::: "memory");
 
-    spi_wait();
-
-    SPI2_TX_SADDR = (uint32_t)sd_tx_buf;
+    SPI2_TX_SADDR = (uint32_t)(uintptr_t)sd_tx_buf;
     SPI2_TX_SIZE = len;
     SPI2_TX_CFG = UDMA_CFG_EN;
 
-    SPI2_CMD_SADDR = (uint32_t)sd_cmd_buf;
+    SPI2_CMD_SADDR = (uint32_t)(uintptr_t)sd_cmd_buf;
     SPI2_CMD_SIZE = ci * 4;
     SPI2_CMD_CFG = UDMA_CFG_EN | (2 << 1);
-    __asm__ volatile ("fence" ::: "memory");
 
-    spi_wait();
+    return spi_wait();
+}
+
+/* Clock out len bytes of 0xFF and receive the reply. */
+static bool spi_clock_ff(uint32_t len)
+{
+    for (uint32_t i = 0; i < len; i++) sd_tx_buf[i] = 0xFF;
+    return spi_full_duplex(len);
 }
 
 /* ---- SD command helpers ---- */
 
-/* Send SD command, return R1 response. CS asserted/deasserted per transaction. */
+/* Send SD command, return R1 response or 0xFF on no reply or SPI failure. */
 static uint8_t sd_send_cmd(uint8_t cmd, uint32_t arg)
 {
     uint8_t frame[6];
@@ -152,7 +193,7 @@ static uint8_t sd_send_cmd(uint8_t cmd, uint32_t arg)
     for (int i = 0; i < 6; i++) sd_tx_buf[i+1] = frame[i];
     for (int i = 7; i < 17; i++) sd_tx_buf[i] = 0xFF;
 
-    spi_full_duplex(17);
+    if (!spi_full_duplex(17)) return 0xFF;
 
     /* Find R1 (first non-0xFF byte after command) */
     uint8_t r1 = 0xFF;
@@ -162,7 +203,8 @@ static uint8_t sd_send_cmd(uint8_t cmd, uint32_t arg)
     return r1;
 }
 
-/* Send command and read 4-byte trailing response (for CMD8, CMD58) */
+/* Send command and read 4-byte trailing response (for CMD8, CMD58).
+   resp4 is only written when a complete response was received. */
 static uint8_t sd_send_cmd_r7(uint8_t cmd, uint32_t arg, uint8_t *resp4)
 {
     uint8_t frame[6];
@@ -177,7 +219,7 @@ static uint8_t sd_send_cmd_r7(uint8_t cmd, uint32_t arg, uint8_t *resp4)
     for (int i = 0; i < 6; i++) sd_tx_buf[i+1] = frame[i];
     for (int i = 7; i < 27; i++) sd_tx_buf[i] = 0xFF;
 
-    spi_full_duplex(27);
+    if (!spi_full_duplex(27)) return 0xFF;
 
     uint8_t r1 = 0xFF;
     int r1_pos = -1;
@@ -185,7 +227,8 @@ static uint8_t sd_send_cmd_r7(uint8_t cmd, uint32_t arg, uint8_t *resp4)
         if (sd_rx_buf[i] != 0xFF) { r1 = sd_rx_buf[i]; r1_pos = i; break; }
     }
 
-    if (r1_pos >= 0 && r1_pos + 4 < 27 && resp4) {
+    if (r1_pos < 0 || r1_pos + 4 >= 27) return 0xFF;
+    if (resp4) {
         for (int i = 0; i < 4; i++) resp4[i] = sd_rx_buf[r1_pos + 1 + i];
     }
     return r1;
@@ -212,13 +255,6 @@ static void spi2_hw_init(uint32_t clkdiv_val)
     __asm__ volatile ("fence" ::: "memory");
 }
 
-/* ---- Delay helper ---- */
-
-static void dly_100us(void)
-{
-    for (volatile int d = 0; d < 5000; d++) __asm__ volatile ("nop");
-}
-
 /* ================================================================== */
 /*                     FatFs Required API                               */
 /* ================================================================== */
@@ -233,15 +269,18 @@ DSTATUS disk_initialize(BYTE pdrv)
 {
     (void)pdrv;
 
-    uint8_t n, ty, ocr[4];
-    uint16_t tmr;
+    uint8_t ty, ocr[4] = { 0, 0, 0, 0 };
+    uint64_t t0;
+
+    Stat = STA_NOINIT;
+    CardType = 0;
 
     /* Init SPI at 400 kHz */
     spi2_hw_init(122);
 
     /* 80 clocks with CS high (no SOT) */
     for (int i = 0; i < 10; i++) sd_tx_buf[i] = 0xFF;
-    spi_tx_no_cs(10);
+    if (!spi_tx_no_cs(10)) return Stat;
 
     ty = 0;
 
@@ -251,24 +290,26 @@ DSTATUS disk_initialize(BYTE pdrv)
         if (sd_send_cmd_r7(8, 0x1AA, ocr) == 1) {
             /* SD v2 */
             if (ocr[2] == 0x01 && ocr[3] == 0xAA) {
-                /* ACMD41 with HCS */
-                for (tmr = 10000; tmr; tmr--) {
+                /* ACMD41 with HCS, up to one second */
+                t0 = millis();
+                for (;;) {
                     uint8_t r = sd_send_cmd(0x80 | 41, 1UL << 30);
-                    if (r == 0) break;
-                    dly_100us();
-                }
-
-                if (tmr) {
-                    /* Read OCR for CCS bit */
-                    if (sd_send_cmd_r7(58, 0, ocr) == 0) {
-                        ty = (ocr[0] & 0x40) ? (CT_SD2 | CT_BLOCK) : CT_SD2;
+                    if (r == 0) {
+                        /* Read OCR for CCS bit */
+                        if (sd_send_cmd_r7(58, 0, ocr) == 0) {
+                            ty = (ocr[0] & 0x40) ? (CT_SD2 | CT_BLOCK) : CT_SD2;
+                        }
+                        break;
                     }
+                    if (r == 0xFF || millis() - t0 > SD_INIT_MS) break;
+                    delay_us(100);
                 }
             }
         } else {
             /* SD v1 or MMC */
             uint8_t cmd;
-            if (sd_send_cmd(0x80 | 41, 0) <= 1) {
+            uint8_t r = sd_send_cmd(0x80 | 41, 0);
+            if (r <= 1) {
                 ty = CT_SD1;
                 cmd = 0x80 | 41;  /* ACMD41 */
             } else {
@@ -276,10 +317,15 @@ DSTATUS disk_initialize(BYTE pdrv)
                 cmd = 0x40 | 1;   /* CMD1 */
             }
 
-            for (tmr = 10000; tmr && sd_send_cmd(cmd, 0); tmr--)
-                dly_100us();
+            t0 = millis();
+            for (;;) {
+                r = sd_send_cmd(cmd, 0);
+                if (r == 0) break;
+                if (r == 0xFF || millis() - t0 > SD_INIT_MS) { ty = 0; break; }
+                delay_us(100);
+            }
 
-            if (!tmr || sd_send_cmd(0x40 | 16, 512) != 0)
+            if (ty && sd_send_cmd(0x40 | 16, 512) != 0)
                 ty = 0;
         }
     }
@@ -302,13 +348,12 @@ DRESULT disk_read(BYTE pdrv, BYTE* buff, LBA_t sector, UINT count)
 {
     (void)pdrv;
 
-    if (!count) return RES_PARERR;
+    if (!count || !buff) return RES_PARERR;
     if (Stat & STA_NOINIT) return RES_NOTRDY;
 
     if (!(CardType & CT_BLOCK)) sector *= 512;
 
     while (count--) {
-        /* Build CMD17 + data read as single transaction */
         uint8_t frame[6];
         frame[0] = 0x40 | 17;
         frame[1] = (sector >> 24) & 0xFF;
@@ -317,33 +362,49 @@ DRESULT disk_read(BYTE pdrv, BYTE* buff, LBA_t sector, UINT count)
         frame[4] = sector & 0xFF;
         frame[5] = sd_crc7(frame, 5);
 
-        /* 1 dummy + 6 cmd + ~2050 receive (token wait + 512 + 2 CRC) */
-        uint32_t total = 2560;
+        /* 1 dummy + 6 cmd + 10 response. CS stays low afterwards. */
         sd_tx_buf[0] = 0xFF;
         for (int i = 0; i < 6; i++) sd_tx_buf[i+1] = frame[i];
-        for (uint32_t i = 7; i < total; i++) sd_tx_buf[i] = 0xFF;
+        for (int i = 7; i < 17; i++) sd_tx_buf[i] = 0xFF;
+        if (!spi_full_duplex(17)) return RES_ERROR;
 
-        spi_full_duplex(total);
-
-        /* Find R1 */
         uint8_t r1 = 0xFF;
-        int r1_pos = -1;
-        for (int i = 7; i < 20; i++) {
-            if (sd_rx_buf[i] != 0xFF) { r1 = sd_rx_buf[i]; r1_pos = i; break; }
+        uint32_t scan = 17;
+        for (uint32_t i = 7; i < 17; i++) {
+            if (sd_rx_buf[i] != 0xFF) { r1 = sd_rx_buf[i]; scan = i + 1; break; }
         }
         if (r1 != 0x00) return RES_ERROR;
 
-        /* Find 0xFE data token */
-        int token_pos = -1;
-        for (int i = r1_pos + 1; i < (int)total; i++) {
-            if (sd_rx_buf[i] == 0xFE) { token_pos = i; break; }
+        /* Look for the 0xFE data token, first in what is left of the command
+         * transfer (a fast card answers within a byte or two), then in small
+         * chunks for up to 100 ms. The bytes after the token in whichever
+         * transfer holds it are the first bytes of the sector. */
+        uint32_t got = 0;
+        uint32_t len = 17;
+        int found = 0;
+        uint64_t t0 = millis();
+        for (;;) {
+            for (uint32_t i = scan; i < len; i++) {
+                if (sd_rx_buf[i] == 0xFE) {
+                    for (uint32_t j = i + 1; j < len && got < 512; j++)
+                        buff[got++] = sd_rx_buf[j];
+                    found = 1;
+                    break;
+                }
+                if (sd_rx_buf[i] != 0xFF) return RES_ERROR;   /* error token */
+            }
+            if (found) break;
+            if (millis() - t0 > SD_READ_TOKEN_MS) return RES_ERROR;
+            if (!spi_clock_ff(SD_POLL_CHUNK)) return RES_ERROR;
+            scan = 0;
+            len = SD_POLL_CHUNK;
         }
-        if (token_pos < 0 || (token_pos + 513) >= (int)total) return RES_ERROR;
 
-        /* Copy 512 bytes of sector data */
-        for (int i = 0; i < 512; i++) {
-            buff[i] = sd_rx_buf[token_pos + 1 + i];
-        }
+        /* Rest of the sector plus the 2 CRC bytes */
+        uint32_t rest = (512 - got) + 2;
+        if (!spi_clock_ff(rest)) return RES_ERROR;
+        for (uint32_t i = 0; got < 512; i++)
+            buff[got++] = sd_rx_buf[i];
 
         sector++;
         buff += 512;
@@ -356,15 +417,14 @@ DRESULT disk_write(BYTE pdrv, const BYTE* buff, LBA_t sector, UINT count)
 {
     (void)pdrv;
 
-    if (!count) return RES_PARERR;
+    if (!count || !buff) return RES_PARERR;
     if (Stat & STA_NOINIT) return RES_NOTRDY;
 
     if (!(CardType & CT_BLOCK)) sector *= 512;
 
     while (count--) {
         /* Build CMD24 + data as single transaction:
-         * 1 dummy + 6 cmd + 10 response + 1 gap + 1 token + 512 data + 2 CRC + 64 busy = 597
-         * Keep it under buffer size */
+         * 1 dummy + 6 cmd + 10 response + 1 gap + 1 token + 512 data + 2 CRC + 64 busy = 597 */
         uint8_t frame[6];
         frame[0] = 0x40 | 24;
         frame[1] = (sector >> 24) & 0xFF;
@@ -374,50 +434,42 @@ DRESULT disk_write(BYTE pdrv, const BYTE* buff, LBA_t sector, UINT count)
         frame[5] = sd_crc7(frame, 5);
 
         uint32_t pos = 0;
-        /* Dummy + CMD24 */
         sd_tx_buf[pos++] = 0xFF;
         for (int i = 0; i < 6; i++) sd_tx_buf[pos++] = frame[i];
-        /* Response wait (10 bytes of 0xFF) */
         for (int i = 0; i < 10; i++) sd_tx_buf[pos++] = 0xFF;
-        /* Gap byte before data */
         sd_tx_buf[pos++] = 0xFF;
-        /* Data token */
         sd_tx_buf[pos++] = 0xFE;
-        /* 512 bytes of data */
         for (int i = 0; i < 512; i++) sd_tx_buf[pos++] = buff[i];
-        /* CRC dummy */
         sd_tx_buf[pos++] = 0xFF;
         sd_tx_buf[pos++] = 0xFF;
-        /* Space for data response + initial busy wait */
         for (int i = 0; i < 64; i++) sd_tx_buf[pos++] = 0xFF;
 
-        spi_full_duplex(pos);
+        if (!spi_full_duplex(pos)) return RES_ERROR;
 
-        /* Find R1 response to CMD24 */
         uint8_t r1 = 0xFF;
         for (int i = 7; i < 17; i++) {
             if (sd_rx_buf[i] != 0xFF) { r1 = sd_rx_buf[i]; break; }
         }
         if (r1 != 0x00) return RES_ERROR;
 
-        /* Find data response token after the 512 data bytes
-         * It's at approximately position 7+10+1+1+512+2 = 533 */
+        /* Data response token follows the 512 data bytes, at about 533 */
         uint8_t resp = 0xFF;
         for (uint32_t i = 530; i < pos; i++) {
             if (sd_rx_buf[i] != 0xFF) { resp = sd_rx_buf[i]; break; }
         }
         if ((resp & 0x1F) != 0x05) return RES_ERROR;
 
-        /* Wait for card to finish programming (busy = 0x00 on MISO) */
+        /* Wait for the card to finish programming (MISO low while busy),
+         * up to 500 ms. */
         int busy_done = 0;
-        for (int attempt = 0; attempt < 50 && !busy_done; attempt++) {
-            for (int j = 0; j < 256; j++) sd_tx_buf[j] = 0xFF;
-            spi_full_duplex(256);
-            for (int j = 0; j < 256; j++) {
+        uint64_t t0 = millis();
+        while (!busy_done) {
+            if (!spi_clock_ff(SD_POLL_CHUNK)) return RES_ERROR;
+            for (uint32_t j = 0; j < SD_POLL_CHUNK; j++) {
                 if (sd_rx_buf[j] != 0x00) { busy_done = 1; break; }
             }
+            if (!busy_done && millis() - t0 > SD_WRITE_BUSY_MS) return RES_ERROR;
         }
-        if (!busy_done) return RES_ERROR;
 
         sector++;
         buff += 512;
@@ -446,6 +498,10 @@ DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void* buff)
 
         case GET_SECTOR_COUNT:
             return RES_PARERR;
+
+        case MMC_GET_TYPE:
+            *(BYTE*)buff = CardType;
+            return RES_OK;
 
         default:
             return RES_PARERR;

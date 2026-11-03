@@ -13,8 +13,9 @@
  * destination address, and byte count from the FIFO, performs a
  * word-by-word copy, then signals completion via an event flag.
  *
- * NOTE: Using BIO DMA reserves Core 3. It is unavailable for user
- * BIO programs while DMA is active.
+ * NOTE: Using BIO DMA reserves Core 3 and whitelist windows 0 to 2
+ * (SRAM, IFRAM, and the program and runtime storage part of RRAM).
+ * Core 3 is unavailable for user BIO programs while DMA is active.
  */
 
 #ifndef _HARDWARE_BIO_DMA_H
@@ -37,18 +38,18 @@ void bio_dma_init(void);
 /*
  * Blocking memory-to-memory copy using BIO Core 3.
  * Both src and dst must be word-aligned.
- * len must be a multiple of 4.
+ * len must be a multiple of 4. Returns -1 and does nothing otherwise.
  * Flushes the CPU data cache after the transfer.
  */
-void bio_dma_memcpy(void *dst, const void *src, uint32_t len);
+int bio_dma_memcpy(void *dst, const void *src, uint32_t len);
 
 /*
  * Start a non-blocking DMA transfer.
  * Both src and dst must be word-aligned.
- * len must be a multiple of 4.
- * Returns immediately. Use bio_dma_busy() or bio_dma_wait().
+ * len must be a multiple of 4. Returns -1 and does nothing otherwise.
+ * Returns 0 at once. Use bio_dma_busy() or bio_dma_wait().
  */
-void bio_dma_start(void *dst, const void *src, uint32_t len);
+int bio_dma_start(void *dst, const void *src, uint32_t len);
 
 /*
  * Returns true if a transfer is still in progress.

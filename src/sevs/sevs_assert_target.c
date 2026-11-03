@@ -7,27 +7,32 @@
  * For RISC-V firmware (CH32V003, CH32V103, CH32V203, CH32V307, CH32H417,
  * Baochip-1x). Behavior on failure:
  *
- *   1. Disable interrupts (best-effort; project may override).
- *   2. Persist a record to a fixed RAM location for post-mortem analysis.
- *   3. Optionally emit a single line to a configured UART using a tiny
- *      bit-banged write that does not depend on driver state.
- *   4. Halt: trigger a watchdog reset on production builds, or spin in a
- *      dedicated trap loop on debug builds so a debugger can catch it.
+ *   1. Disable interrupts.
+ *   2. Persist a record to a linker-reserved RAM location for post-mortem
+ *      analysis.
+ *   3. Emit a single line to a configured UART.
+ *   4. Halt.
  *
  * Project-specific hooks let each target customize behavior without
  * editing this file. Provide your own:
- *   - sevs_target_disable_irq()    weakly defined here as no-op
- *   - sevs_target_uart_write_str() weakly defined here as no-op
+ *   - sevs_target_disable_irq()    defined here for RISC-V
+ *   - sevs_target_uart_write_str() weakly defined here, writes to UART2
  *   - sevs_target_halt()           weakly defined here as while(1)
  *
- * The persistent crash record at SEVS_CRASH_RECORD_ADDR is the
- * post-mortem mechanism; firmware should check this region on boot and
- * report any crash from the previous run.
+ * A no-op uart hook makes every assertion in the SDK a silent stop, which
+ * is the worst possible failure mode for a safety framework. Boards must
+ * provide a real one. See sevs_hooks_bao1x.c for the Baochip-1x version.
+ *
+ * The crash record lives in its own linker section so that no other object
+ * can be placed over it. A hardcoded absolute address will eventually land
+ * inside somebody's .bss.
  *
  * @copyright (c) 2026 Armstrong Subero. SEVS reference implementation.
  */
 
 #include "sevs_runtime.h"
+#include "hardware/uart.h"
+#include "boards/dabao.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -35,12 +40,6 @@
 /* ------------------------------------------------------------------------ */
 /* Configuration                                                            */
 /* ------------------------------------------------------------------------ */
-
-/* Where the crash record lives in RAM. Survives soft reset. Override per
- * target; default points at a fixed address near top of RAM. */
-#ifndef SEVS_CRASH_RECORD_ADDR
-#  define SEVS_CRASH_RECORD_ADDR ((uintptr_t)0x61100000U)  /* Baochip-1x SRAM */
-#endif
 
 /* Magic value identifying a valid crash record. */
 #define SEVS_CRASH_MAGIC ((uint32_t)0x53455653U)  /* "SEVS" */
@@ -63,6 +62,19 @@ typedef struct {
 SEVS_STATIC_ASSERT(sizeof(sevs_crash_record_t) <= 192,
                    "crash record must fit in reserved RAM slot");
 
+/*
+ * Placed by the linker into .sevs_crash, a NOLOAD section the startup code
+ * must not clear. If a target has no such section defined, override
+ * SEVS_CRASH_RECORD_ADDR at build time and this definition is skipped.
+ */
+#ifdef SEVS_CRASH_RECORD_ADDR
+#  define sevs_crash_slot (*(sevs_crash_record_t *)(uintptr_t)SEVS_CRASH_RECORD_ADDR)
+#else
+static sevs_crash_record_t sevs_crash_record
+    __attribute__((section(".sevs_crash"), used));
+#  define sevs_crash_slot sevs_crash_record
+#endif
+
 /* ------------------------------------------------------------------------ */
 /* Weak hooks - projects override                                           */
 /* ------------------------------------------------------------------------ */
@@ -75,15 +87,25 @@ SEVS_STATIC_ASSERT(sizeof(sevs_crash_record_t) <= 192,
 
 SEVS_WEAK void sevs_target_disable_irq(void)
 {
-    /* default: no-op. RISC-V projects typically use:
-     *   __asm__ volatile ("csrci mstatus, 0x8");
-     * Override per project. */
+    /* RISC-V: clear mstatus.MIE. Every SEVS target is RISC-V. */
+    __asm__ volatile ("csrci mstatus, 0x8" ::: "memory");
 }
 
+/* Studio does not compile sevs_hooks_bao1x.c, so the Baochip default
+ * writes to the board console itself. A strong override still wins. */
 SEVS_WEAK void sevs_target_uart_write_str(const char *s)
 {
-    (void)s;
-    /* default: no-op. Override to emit to a debug UART. */
+    size_t n = 0U;
+
+    if (s == NULL) {
+        return;
+    }
+    while (n < 256U && s[n] != '\0') {
+        n++;
+    }
+    if (n != 0U) {
+        uart_write(BAO_DEFAULT_UART, (const uint8_t *)s, (uint32_t)n);
+    }
 }
 
 SEVS_WEAK void sevs_target_halt(void)
@@ -149,18 +171,38 @@ static size_t fmt_dec(char *buf, int v)
 /* The handler                                                              */
 /* ------------------------------------------------------------------------ */
 
+/*
+ * Reentrancy guard. The uart hook calls driver code, and driver code
+ * contains SEVS_ASSERT. Without this, one assertion inside the console
+ * path recurses until the stack is gone.
+ */
+static volatile uint32_t sevs_in_handler = 0U;
+
 void sevs_assert_fail(sevs_fail_kind_t kind,
                       const char       *expr,
                       const char       *file,
                       int               line,
                       const char       *func)
 {
-    /* Step 1: disable interrupts, best-effort. */
+    /* Step 1: disable interrupts. The previous mstatus.MIE state is kept
+     * so that a recoverable SEVS_CHECK can hand it back on the way out;
+     * otherwise one failed check leaves the whole program running with
+     * interrupts masked (timers, UART RX and the tick all stop). */
+    uint32_t saved_mstatus;
+    __asm__ volatile ("csrr %0, mstatus" : "=r"(saved_mstatus) :: "memory");
     sevs_target_disable_irq();
 
+    /* Nested failure: the record from the first one is the useful one.
+     * Do not touch it, do not try the console again, just stop. */
+    if (sevs_in_handler != 0U) {
+        for (;;) {
+            __asm__ volatile ("" ::: "memory");
+        }
+    }
+    sevs_in_handler = 1U;
+
     /* Step 2: persist crash record. */
-    sevs_crash_record_t *rec =
-        (sevs_crash_record_t *)SEVS_CRASH_RECORD_ADDR;
+    sevs_crash_record_t *rec = &sevs_crash_slot;
     rec->magic = SEVS_CRASH_MAGIC;
     rec->kind  = (uint32_t)kind;
     rec->line  = (uint32_t)line;
@@ -169,8 +211,8 @@ void sevs_assert_fail(sevs_fail_kind_t kind,
     copy_clipped(rec->func, sizeof(rec->func), func);
     rec->reserved = 0U;
 
-    /* Step 3: emit a one-line summary to debug UART, if project hook
-     * provides one. Format: [SEVS-KIND] file:line: in func: (expr) */
+    /* Step 3: emit a one-line summary to debug UART.
+     * Format: [SEVS-KIND] file:line: in func: (expr) */
     char    msg[256];
     size_t  pos = 0U;
     const char *prefix = "[SEVS-";
@@ -190,7 +232,7 @@ void sevs_assert_fail(sevs_fail_kind_t kind,
         while (*p != '\0' && pos + 1U < sizeof(msg)) { msg[pos++] = *p++; }
     }
     if (pos + 1U < sizeof(msg)) { msg[pos++] = ':'; }
-    pos += fmt_dec(&msg[pos], line);
+    if (pos + 12U < sizeof(msg)) { pos += fmt_dec(&msg[pos], line); }
 
     if (func != NULL) {
         const char *p = ": in ";
@@ -216,6 +258,10 @@ void sevs_assert_fail(sevs_fail_kind_t kind,
 
     /* Step 4: action by kind. CHECK is recoverable; others halt. */
     if (kind == SEVS_FAIL_CHECK) {
+        sevs_in_handler = 0U;
+        if ((saved_mstatus & 0x8U) != 0U) {
+            __asm__ volatile ("csrsi mstatus, 0x8" ::: "memory");
+        }
         return;
     }
 
@@ -243,8 +289,7 @@ int sevs_target_pop_crash_record(sevs_crash_record_t *out)
     if (out == NULL) {
         return 0;
     }
-    sevs_crash_record_t *rec =
-        (sevs_crash_record_t *)SEVS_CRASH_RECORD_ADDR;
+    sevs_crash_record_t *rec = &sevs_crash_slot;
     if (rec->magic != SEVS_CRASH_MAGIC) {
         return 0;
     }

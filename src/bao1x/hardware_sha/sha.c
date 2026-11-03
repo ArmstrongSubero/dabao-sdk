@@ -85,7 +85,7 @@ static void s_hash_wait_done(void)
 void sha256_init(void)
 {
     SCE_SCEMODE = 0;
-    SCE_SUBCLKEN |= (1 << 2);
+    SCE_SUBCLKEN |= (1 << 3);   /* HASH_EN. Bit 2 is PKE_EN. */
     memory_fence();
 
     s_hash_load_u32(s_sha256_h, HASH_LKEY_BUF, 8);

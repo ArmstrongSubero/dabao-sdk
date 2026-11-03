@@ -13,9 +13,15 @@
 
 /*
  * The compiler emits calls to memcpy and memset when optimizing
- * array initializers and struct copies. Provide minimal implementations
- * so we don't need to link against a full libc.
+ * array initializers and struct copies, so the SDK provides them.
+ *
+ * At -O2 and above GCC recognises these byte loops as memcpy and memset
+ * and replaces them with calls to memcpy and memset, so each function
+ * calls itself until the stack runs out of SRAM. The optimize attribute
+ * turns that off for these bodies at every optimisation level. memcmp
+ * carries it too because it has the same shape.
  */
+__attribute__((weak, optimize("no-tree-loop-distribute-patterns")))
 void *memcpy(void *dst, const void *src, size_t n)
 {
     uint8_t *d = (uint8_t *)dst;
@@ -24,6 +30,7 @@ void *memcpy(void *dst, const void *src, size_t n)
     return dst;
 }
 
+__attribute__((weak, optimize("no-tree-loop-distribute-patterns")))
 void *memset(void *dst, int val, size_t n)
 {
     uint8_t *d = (uint8_t *)dst;
@@ -37,6 +44,7 @@ void *memset(void *dst, int val, size_t n)
  *  @param[in] n Number of bytes to compare.
  *  @return 0 if equal, positive if a > b, negative if a < b.
  *  @req REQ-DABAO-STDLIB-0001 */
+__attribute__((weak, optimize("no-tree-loop-distribute-patterns")))
 int memcmp(const void *a, const void *b, size_t n)
 {
     SEVS_REQUIRE_NOT_NULL(a);
@@ -50,7 +58,7 @@ int memcmp(const void *a, const void *b, size_t n)
     return 0;
 }
 
-char *strchr(const char *s, int c)
+__attribute__((weak)) char *strchr(const char *s, int c)
 {
     while (*s) {
         if (*s == (char)c) return (char *)s;
@@ -68,6 +76,13 @@ void setup_default_uart(void)
 
 void bao_init(void)
 {
+     /*
+     * First, before any peripheral is touched. boot1 hands over with
+     * its own event sources live and pending bits set, and nothing else
+     * in this SDK will ever clear them.
+     */
+     bao_events_clear();
+
     /*
      * boot0/boot1 have already configured:
      *   - PLL to 350 MHz (aclk)

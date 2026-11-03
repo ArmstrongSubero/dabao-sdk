@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Armstrong Subero
  * SPDX-License-Identifier: Apache-2.0
  *
- * bao.h - BIO Coprocessor Driver for Baochip-1x
+ * bao_bio.h - BIO Coprocessor Driver for Baochip-1x
  *
  * Bare metal C driver for the BIO (Bao I/O) coprocessor.
  * The BIO is a cluster of four PicoRV32 RISC-V cores (RV32-EMC)
@@ -21,7 +21,7 @@
  *   - bao1x-hal/src/bio_hw.rs (Rust HAL reference)
  *
  * Usage:
- *   #include "bio.h"
+ *   #include "hardware/bio.h"
  *   bio_init(700000000);       // call once at startup with fclk in Hz
  *   bio_load_code(0, code, len);
  *   bio_set_target_freq(0, 1000000);
@@ -33,6 +33,10 @@
 #define _HARDWARE_BIO_H
 
 #include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* ========================================================================== */
 /*                          BIO_BDMA Register Block                            */
@@ -536,5 +540,17 @@ uint32_t bio_get_version(void);
  * bio_get_fclk - Returns the fclk value passed to bio_init().
  */
 uint32_t bio_get_fclk(void);
+
+/*
+ * bio_allow_range: open one BIO DMA whitelist window (0 to 3) so BIO cores
+ * can load and store within [addr, addr + len). The hardware compares in
+ * 4 KB pages, so the window is rounded out to page boundaries. Returns 0 on
+ * success, -1 on a bad window index or zero length.
+ */
+int bio_allow_range(uint32_t window, uint32_t addr, uint32_t len);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _HARDWARE_BIO_H */

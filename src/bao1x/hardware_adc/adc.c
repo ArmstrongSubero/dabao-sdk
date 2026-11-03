@@ -88,15 +88,16 @@ uint32_t adc_read_raw(uint32_t channel)
     ADC0_RX_CFG = ADC_RX_CLEAR;
     memory_fence();
     s_adc_rx_buf = 0;
+    memory_fence();
 
     ADC0_RX_SADDR = (uint32_t)(uintptr_t)&s_adc_rx_buf;
     ADC0_RX_SIZE  = 4;
     ADC0_RX_CFG   = ADC_RX_CONST | ADC_RX_START;
-    memory_fence();
 
     for (int s_poll = 0; s_poll < ADC_POLL_TIMEOUT && ADC0_RX_SIZE != 0; s_poll++) {
         /* bounded poll */
     }
+    memory_fence();
 
     uint32_t raw = s_adc_rx_buf & ADC_MAX_VALUE;
 
@@ -131,15 +132,16 @@ uint32_t adc_read_temp_raw(void)
     ADC0_RX_CFG = ADC_RX_CLEAR;
     memory_fence();
     s_adc_rx_buf = 0;
+    memory_fence();
 
     ADC0_RX_SADDR = (uint32_t)(uintptr_t)&s_adc_rx_buf;
     ADC0_RX_SIZE  = 4;
     ADC0_RX_CFG   = ADC_RX_CONST | ADC_RX_START;
-    memory_fence();
 
     for (int s_poll = 0; s_poll < ADC_POLL_TIMEOUT && ADC0_RX_SIZE != 0; s_poll++) {
         /* bounded poll */
     }
+    memory_fence();
 
     uint32_t raw = s_adc_rx_buf & ADC_MAX_VALUE;
 
@@ -158,9 +160,8 @@ uint32_t adc_raw_to_mv(uint32_t raw)
 {
     SEVS_ASSERT(ADC_VREF_MV > 0);
     SEVS_ASSERT(ADC_MAX_VALUE > 0);
-    /*
-     * mV = raw * Vref / full_scale.  Matches the reference manual:
-     * VIN = dout / 1023 * Vbg.
-     */
+    if (raw == 0) {
+        return 0;
+    }
     return (raw * ADC_VREF_MV) / ADC_MAX_VALUE;
 }

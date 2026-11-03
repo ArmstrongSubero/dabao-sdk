@@ -46,8 +46,10 @@
 /* CONFIG register fields */
 #define PWM_CFG_CLKSEL_REF     (0 << 11)
 #define PWM_CFG_CLKSEL_FLL     (1 << 11)
-#define PWM_CFG_UPDOWN_UP      (0 << 12)
-#define PWM_CFG_UPDOWN_UPDN    (1 << 12)
+/* UPDOWNSEL: 0 counts up and down (centre aligned), 1 counts up and resets
+ * (edge aligned). Names follow the vendor HAL. */
+#define PWM_CFG_UPDOWN_UPDN    (0 << 12)
+#define PWM_CFG_UPDOWN_UP      (1 << 12)
 #define PWM_CFG_PRESC(n)       (((n) & 0xFF) << 16)
 
 /* THRESHOLD register packing */

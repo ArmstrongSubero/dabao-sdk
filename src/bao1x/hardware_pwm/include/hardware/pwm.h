@@ -26,7 +26,9 @@ extern "C" {
  */
 uint16_t pwm_init(uint slice, uint32_t freq_hz);
 
-/* Set the raw duty count for a channel (0 to period). */
+/* Set the raw duty count for a channel (0 to period). 0 holds the
+ * output low and period holds it high, with no compare collision, so
+ * the full 0 to 100 percent range is usable. */
 void pwm_set_duty(uint slice, uint channel, uint16_t duty);
 
 /* Set duty as a percentage (0 to 100). */

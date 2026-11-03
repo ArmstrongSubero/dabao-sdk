@@ -17,7 +17,13 @@
 
 #include "hardware/w25q.h"
 #include "hardware/qspi.h"
+#include "bao/stdlib.h"
 #include "sevs_runtime.h"
+
+/* Longest the flash may stay busy. A page program is under 3 ms and a
+ * sector erase under 400 ms, but a chip erase on a W25Q128 takes up to
+ * 200 s, so the waits are timed rather than counted. */
+#define W25Q_BUSY_TIMEOUT_MS    210000u
 
 /* W25Q command opcodes */
 #define CMD_WRITE_ENABLE        0x06
@@ -91,13 +97,16 @@ static int w25q_wait_wip(void)
      * as a timeout rather than as success: callers use the return value to
      * decide whether a program or erase completed.
      */
-    int s_poll;
-    for (s_poll = 0; s_poll < 1000000; s_poll++)
+    uint64_t t0 = millis();
+    for (;;)
     {
         if (!(w25q_read_sr1() & W25Q_SR1_BUSY))
             return BAO_OK;
+        if (qspi_timed_out(s_instance))
+            return BAO_ERROR_TIMEOUT;
+        if (millis() - t0 > W25Q_BUSY_TIMEOUT_MS)
+            return BAO_ERROR_TIMEOUT;
     }
-    return BAO_ERROR_TIMEOUT;
 }
 
 /** @brief Initialize the W25Q flash: reset the chip and verify JEDEC ID.
@@ -220,13 +229,8 @@ bool w25q_is_busy(void)
  *  @req REQ-DABAO-W25Q-0010 */
 void w25q_wait_busy(void)
 {
-    int s_poll;
-    for (s_poll = 0; s_poll < 1000000; s_poll++) {
-        if (!w25q_is_busy())
-            return;
-    }
-    /* Bound exhausted, the flash is still busy. Record it. */
-    s_wait_timeout = true;
+    if (w25q_wait_wip() != BAO_OK)
+        s_wait_timeout = true;
 }
 
 /** @brief Report whether w25q_wait_busy() gave up while the flash was busy.

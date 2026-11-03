@@ -137,9 +137,21 @@ int w25q_enable_quad(void);
 bool w25q_is_busy(void);
 
 /*
- * Block until the flash is no longer busy.
+ * Block until the flash is no longer busy, or until the busy timeout
+ * (210 s, long enough for a chip erase) expires.
  */
 void w25q_wait_busy(void);
+
+/*
+ * True if w25q_wait_busy() gave up while the flash was still busy. Sticky
+ * until w25q_clear_timeout() or w25q_init().
+ */
+bool w25q_timed_out(void);
+
+/*
+ * Clear the flag set by a timed out wait.
+ */
+void w25q_clear_timeout(void);
 
 #ifdef __cplusplus
 }

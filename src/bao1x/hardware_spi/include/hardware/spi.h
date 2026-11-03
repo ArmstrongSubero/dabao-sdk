@@ -33,6 +33,12 @@ extern "C" {
 void spi_init(uint instance);
 
 /*
+ * Select SPI mode (cpol, cpha) for later transfers. spi_init resets it
+ * to mode 0.
+ */
+void spi_set_mode(uint instance, uint8_t cpol, uint8_t cpha);
+
+/*
  * Write len bytes over SPI. No data is read back.
  *
  * clkdiv: SPI clock = perclk / (2 * (clkdiv + 1))
@@ -44,6 +50,8 @@ void spi_write_blocking(uint instance, const uint8_t *data, uint32_t len, uint8_
 /*
  * Full-duplex SPI transfer. Writes tx and simultaneously reads into rx.
  * Either tx or rx may be NULL for write-only or read-only transfers.
+ * The DMA buffers are shared by all instances; a call made while an async
+ * transfer is still running on any instance waits for it first.
  */
 void spi_write_read_blocking(uint instance, const uint8_t *tx, uint8_t *rx,
                              uint32_t len, uint8_t clkdiv);
@@ -59,8 +67,9 @@ void spi_write_read_blocking(uint instance, const uint8_t *tx, uint8_t *rx,
     ((7 << 28) | ((lsbfirst) << 26) | (((bitsword) - 1) << 16) | (((words) - 1) & 0xFFFF))
 #define SPI_CMD_FULL_DUPLEX(words, bitsword, lsbfirst) \
     ((0xC << 28) | ((lsbfirst) << 26) | (((bitsword) - 1) << 16) | (((words) - 1) & 0xFFFF))
+/* Bit 0 raises an event, bit 1 keeps CS asserted (udma_spim_ctrl.sv). */
 #define SPI_CMD_EOT(evt, cs_keep) \
-    ((9 << 28) | ((evt) << 1) | ((cs_keep) & 1))
+    ((9 << 28) | (((cs_keep) & 1) << 1) | ((evt) & 1))
 
 /*
  * Start an asynchronous full-duplex SPI transfer.

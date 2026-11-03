@@ -13,17 +13,34 @@
  *   5. Switch RRC back to normal mode
  *   6. Flush VexRiscv data cache
  *   7. Verify by readback
+ *
+ * Steps 1 through 5 run with mstatus.MIE clear. The controller commits the
+ * staged buffer to the last address touched, and an interrupt handler
+ * executes from ReRAM, so a handler entered mid sequence redirects the
+ * write to the handler's own address. On A0 silicon the hardware write
+ * protection over the boot partitions does not stop this, so a misdirected
+ * commit can corrupt boot0 or boot1 and leave the part unable to boot.
  */
 
+/* Tell rram.h not to install the call-site guard macros here, or they
+ * would rewrite the function definitions below. */
+#define RRAM_DRIVER_IMPL
 #include "hardware/rram.h"
 #include "hardware/regs/addressmap.h"
 #include "hardware/regs/pmu.h"
+#include "bao/platform.h"
 #include "sevs_runtime.h"
 
 #define RRC_LOAD_BUFFER     0x5200
 #define RRC_WRITE_BUFFER    0x9528
-#define RRC_CR_NORMAL       0x0
-#define RRC_CR_WRITE_CMD    0x2
+/* The upper bits of RRC_CR enable the RRAM access control protections.
+ * Xous writes them into the register on every update (SECURITY_MODE in
+ * bao1x-hal rram.rs) and the boot chain leaves the register at 0xFC00, so
+ * both values below carry them. They are constants: the register itself
+ * is never read. */
+#define RRC_CR_SECURITY     0xFC00u
+#define RRC_CR_NORMAL       (RRC_CR_SECURITY | 0x0u)
+#define RRC_CR_WRITE_CMD    (RRC_CR_SECURITY | 0x2u)
 
 #define RRAM_WRITE_RETRIES  2
 
@@ -62,21 +79,33 @@ static int write_page_raw(uint32_t page_addr, const uint8_t *data)
 {
     SEVS_ASSERT(RRAM_PAGE_SIZE == 32);
     SEVS_REQUIRE_NOT_NULL(data);
-    uint32_t cr_base = RRC_CR & ~0x3;
+
+    uint32_t irq_state = critical_enter();
+
+    /*
+     * RRC_CR is only ever written with the two constants above, never
+     * read. Reading the RRC configuration block from application code is
+     * the access that tripped the tamper counter and killed a board.
+     */
 
     /* Normal mode: write 4 x 64-bit words */
-    RRC_CR = cr_base | RRC_CR_NORMAL;
+    RRC_CR = RRC_CR_NORMAL;
     memory_fence();
 
+    /* Assemble the four 64 bit words from bytes. data is often a byte
+     * buffer with no particular alignment, and a 64 bit load through it
+     * would trap here, inside the critical section. */
     volatile uint64_t *dst = (volatile uint64_t *)(uintptr_t)page_addr;
-    const uint64_t *src = (const uint64_t *)data;
     for (int i = 0; i < 4; i++) {
-        dst[i] = src[i];
+        uint64_t w = 0;
+        for (int b = 7; b >= 0; b--)
+            w = (w << 8) | data[i * 8 + b];
+        dst[i] = w;
         memory_fence();
     }
 
     /* Command mode: load + flush */
-    RRC_CR = cr_base | RRC_CR_WRITE_CMD;
+    RRC_CR = RRC_CR_WRITE_CMD;
     memory_fence();
 
     *(volatile uint32_t *)(uintptr_t)page_addr = RRC_LOAD_BUFFER;
@@ -86,11 +115,13 @@ static int write_page_raw(uint32_t page_addr, const uint8_t *data)
     memory_fence();
 
     /* Back to normal */
-    RRC_CR = cr_base | RRC_CR_NORMAL;
+    RRC_CR = RRC_CR_NORMAL;
     memory_fence();
 
     /* Flush data cache */
     cache_flush();
+
+    critical_exit(irq_state);
 
     return 0;
 }
@@ -112,8 +143,8 @@ static int verify_page(uint32_t page_addr, const uint8_t *expected)
 }
 
 /** @brief Write and verify a single 32-byte page with retry on failure.
- *  @param[in] page_addr Page-aligned address within the user ReRAM region.
- *  @param[out] data 32 bytes of data to write.
+ *  @param[in] page_addr Page-aligned address within the writable region.
+ *  @param[in] data 32 bytes of data to write.
  *  @return 0 on success, -1 on bounds error, -2 on verify failure after retries.
  *  @req REQ-DABAO-RRAM-0002 */
 int rram_write_page(uint32_t page_addr, const uint8_t *data)
@@ -121,10 +152,10 @@ int rram_write_page(uint32_t page_addr, const uint8_t *data)
     SEVS_ASSERT(RRAM_PAGE_SIZE == 32);
     SEVS_ASSERT(RRAM_USER_BASE < RRAM_USER_TOP);
     SEVS_REQUIRE_NOT_NULL(data);
-    /* Bounds check */
-    if (page_addr < RRAM_USER_BASE)
+    /* Bounds check, written so no sum can wrap. */
+    if (page_addr < RRAM_WRITE_BASE || page_addr >= RRAM_USER_TOP)
         return -1;
-    if (page_addr + RRAM_PAGE_SIZE > RRAM_USER_TOP)
+    if (RRAM_USER_TOP - page_addr < RRAM_PAGE_SIZE)
         return -1;
     if (page_addr & (RRAM_PAGE_SIZE - 1))
         return -1;
@@ -153,7 +184,7 @@ int rram_erase_page(uint32_t page_addr)
 }
 
 /** @brief Write an arbitrary byte range to ReRAM with read-modify-write for partial pages.
- *  @param[in] addr Starting byte address within the user ReRAM region.
+ *  @param[in] addr Starting byte address within the writable region.
  *  @param[in] data Source data buffer.
  *  @param[in] len Number of bytes to write.
  *  @return 0 on success, negative on error.
@@ -162,9 +193,9 @@ int rram_write(uint32_t addr, const uint8_t *data, uint32_t len)
 {
     SEVS_ASSERT(RRAM_USER_BASE < RRAM_USER_TOP);
     SEVS_REQUIRE_NOT_NULL(data);
-    if (addr < RRAM_USER_BASE)
+    if (addr < RRAM_WRITE_BASE || addr >= RRAM_USER_TOP)
         return -1;
-    if (addr + len > RRAM_USER_TOP)
+    if (len > RRAM_USER_TOP - addr)
         return -1;
     if (len == 0)
         return 0;

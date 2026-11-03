@@ -96,6 +96,8 @@ int aes_set_key(const uint8_t *key, uint32_t key_len)
 }
 
 /** @brief ECB encrypt or decrypt a data block.  */
+#define AES_SEG_BYTES 256u
+
 static int s_aes_ecb_crypt(const uint8_t *in, uint8_t *out, uint32_t len, uint8_t func)
 {
     SEVS_ASSERT(AES_POLL_TIMEOUT > 0);
@@ -103,17 +105,27 @@ static int s_aes_ecb_crypt(const uint8_t *in, uint8_t *out, uint32_t len, uint8_
         return -1;
     }
 
-    AES_OPT3 = 0;
-    s_aes_load_bytes(in, AES_IN_BUF, len);
+    /* The SCE input and output segments are 256 bytes each, so longer
+     * buffers go through in 256 byte pieces. ECB blocks are independent. */
+    while (len > 0) {
+        uint32_t chunk = (len > AES_SEG_BYTES) ? AES_SEG_BYTES : len;
 
-    AES_OPT1 = s_key_mode;
-    AES_OPT2 = (len / 16) - 1;
-    AES_CRFUNC = func;
+        AES_OPT3 = 0;
+        s_aes_load_bytes(in, AES_IN_BUF, chunk);
 
-    s_aes_trigger();
-    s_aes_wait_done();
+        AES_OPT1 = s_key_mode;
+        AES_OPT2 = (chunk / 16) - 1;
+        AES_CRFUNC = func;
 
-    s_aes_read_bytes(AES_OUT_BUF, out, len / 4);
+        s_aes_trigger();
+        s_aes_wait_done();
+
+        s_aes_read_bytes(AES_OUT_BUF, out, chunk / 4);
+
+        in  += chunk;
+        out += chunk;
+        len -= chunk;
+    }
 
     return 0;
 }

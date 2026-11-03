@@ -9,8 +9,15 @@
  * quad-mode TX/RX via bit 27 of the command word.
  *
  * Pin assignments derived from the CrossBar pinmap HAL:
- *   SPIM1: PC7=D0, PC8=D1, PC9=D2, PC10=D3, PC11=CLK,
- *          PC12=CS0, PC13=CS1 (all AF1)
+ *   SPIM1: PC7=D0, PC8=D1, PC9=D2, PC10=D3, PC11=CLK, PC12=CS0 (all AF1)
+ *
+ * PC13 is QSPI1_CS1 in the pin mux and is deliberately not configured here.
+ * On Dabao that pin is the USB SE0 line and the PROG button, which boot1
+ * reads to enter the bootloader. Muxing it for a chip select removes the
+ * only way back into the bootloader on a board flashed in persistent mode,
+ * and it would happen to anyone calling qspi_init even if they never select
+ * CS1. Single device operation on CS0 is unaffected. A design that needs
+ * two devices on one bus must mux PC13 itself and accept losing PROG.
  */
 
 #include "hardware/qspi.h"
@@ -38,16 +45,13 @@ static const uint32_t spim_cg[] = {
     UDMA_CG_SPIM3,
 };
 
+static uint8_t qspi_clkdiv[4];
+
 /*
- * Per-instance timeout flag.
- *
- * Every wait loop in this driver is bounded rather than infinite, which is
- * deliberate: a hung device must not lock the CPU. The cost is that an
- * exhausted loop used to return normally, so a caller could not tell a
- * completed transfer from an abandoned one.
- *
- * Any bounded loop that exhausts now sets this flag. Call qspi_timed_out()
- * after a transfer to check, and qspi_clear_timeout() to reset it.
+ * Per instance timeout flag. Every wait loop in this driver is bounded so a
+ * hung device cannot lock the CPU. A loop that exhausts sets this flag, so a
+ * caller can tell an abandoned transfer from a completed one. Sticky until
+ * qspi_clear_timeout() or qspi_init().
  */
 static bool qspi_timeout[4];
 
@@ -60,8 +64,7 @@ static void qspi_wait_cmd(uint inst)
 {
     if (inst > 3) return;
 
-    int s_poll;
-    for (s_poll = 0; s_poll < 1000000; s_poll++) {
+    for (int s_poll = 0; s_poll < 1000000; s_poll++) {
         if (!(*qreg(inst, UDMA_CMD_CFG_OFFSET) & UDMA_CFG_EN))
             return;
     }
@@ -72,8 +75,7 @@ static void qspi_wait_tx(uint inst)
 {
     if (inst > 3) return;
 
-    int s_poll;
-    for (s_poll = 0; s_poll < 1000000; s_poll++) {
+    for (int s_poll = 0; s_poll < 1000000; s_poll++) {
         if (!(*qreg(inst, UDMA_TX_CFG_OFFSET) & UDMA_CFG_EN))
             return;
     }
@@ -84,8 +86,7 @@ static void qspi_wait_rx(uint inst)
 {
     if (inst > 3) return;
 
-    int s_poll;
-    for (s_poll = 0; s_poll < 1000000; s_poll++) {
+    for (int s_poll = 0; s_poll < 1000000; s_poll++) {
         if (!(*qreg(inst, UDMA_RX_CFG_OFFSET) & UDMA_CFG_EN))
             return;
     }
@@ -102,6 +103,7 @@ void qspi_init(uint instance, uint8_t clkdiv)
 
     if (instance > 3) return;
 
+    qspi_clkdiv[instance] = clkdiv;
     qspi_timeout[instance] = false;
 
     /* Open UDMA clock gate */
@@ -110,14 +112,14 @@ void qspi_init(uint instance, uint8_t clkdiv)
     /* Pin muxing for SPIM1 (Dabao QSPI port) */
     if (instance == 1)
     {
-        /* All SPIM1 pins are AF1 on port C */
+        /* All SPIM1 pins are AF1 on port C. PC13 (CS1) is left as boot1
+         * configured it, because on Dabao it is SE0 and the PROG button. */
         gpio_set_function(GPIO_PORT_C,  7, GPIO_FUNC_AF1);  /* D0 */
         gpio_set_function(GPIO_PORT_C,  8, GPIO_FUNC_AF1);  /* D1 */
         gpio_set_function(GPIO_PORT_C,  9, GPIO_FUNC_AF1);  /* D2 */
         gpio_set_function(GPIO_PORT_C, 10, GPIO_FUNC_AF1);  /* D3 */
         gpio_set_function(GPIO_PORT_C, 11, GPIO_FUNC_AF1);  /* CLK */
         gpio_set_function(GPIO_PORT_C, 12, GPIO_FUNC_AF1);  /* CS0 */
-        gpio_set_function(GPIO_PORT_C, 13, GPIO_FUNC_AF1);  /* CS1 */
 
         /* Data lines: D0 and CLK are outputs, D1-D3 are bidirectional */
         gpio_set_dir(GPIO_PORT_C, 11, true);   /* CLK output */
@@ -126,7 +128,6 @@ void qspi_init(uint instance, uint8_t clkdiv)
         gpio_set_dir(GPIO_PORT_C,  9, false);  /* D2 input */
         gpio_set_dir(GPIO_PORT_C, 10, false);  /* D3 input */
         gpio_set_dir(GPIO_PORT_C, 12, true);   /* CS0 output */
-        gpio_set_dir(GPIO_PORT_C, 13, true);   /* CS1 output */
 
         /* Pull-ups on data inputs */
         gpio_pull_up(GPIO_PORT_C,  8);
@@ -138,10 +139,10 @@ void qspi_init(uint instance, uint8_t clkdiv)
     qspi_cmd_buf[0] = QSPI_CMD_CFG(clkdiv, 0, 0);
 
     qspi_wait_cmd(instance);
+    memory_fence();
     *qreg(instance, UDMA_CMD_SADDR_OFFSET) = (uint32_t)(uintptr_t)qspi_cmd_buf;
     *qreg(instance, UDMA_CMD_SIZE_OFFSET)  = 1 * 4;
     *qreg(instance, UDMA_CMD_CFG_OFFSET)   = UDMA_CFG_EN | UDMA_CFG_SIZE_32;
-    memory_fence();
     qspi_wait_cmd(instance);
 }
 
@@ -156,19 +157,22 @@ void qspi_exec_cmds(uint instance, const uint32_t *cmds, uint32_t ncmds)
     if (instance > 3 || ncmds == 0 || ncmds > 16) return;
 
     qspi_wait_cmd(instance);
+    if (qspi_timeout[instance]) return;
 
     for (uint32_t i = 0; i < ncmds; i++)
         qspi_cmd_buf[i] = cmds[i];
+    memory_fence();
 
     *qreg(instance, UDMA_CMD_SADDR_OFFSET) = (uint32_t)(uintptr_t)qspi_cmd_buf;
     *qreg(instance, UDMA_CMD_SIZE_OFFSET)  = ncmds * 4;
     *qreg(instance, UDMA_CMD_CFG_OFFSET)   = UDMA_CFG_EN | UDMA_CFG_SIZE_32;
-    memory_fence();
 }
 
 /** @brief Assert a chip select line.
  *  @param[in] instance SPI master index (0-3).
- *  @param[in] cs Chip select number (0-1).
+ *  @param[in] cs Chip select number. Use 0. CS1 is not pin muxed by
+ *             qspi_init on Dabao because PC13 is SE0 and PROG, so the
+ *             command is issued but the pin does not drive.
  *  @req REQ-DABAO-QSPI-0003 */
 void qspi_select(uint instance, uint8_t cs)
 {
@@ -254,16 +258,18 @@ void qspi_write_blocking(uint instance, const uint8_t *data,
     SEVS_REQUIRE_NOT_NULL(data);
     if (instance > 3 || len == 0) return;
 
-    int s_guard;
-    for (s_guard = 0; s_guard < 100000 && (len > 0); s_guard++)
+    for (int s_guard = 0; s_guard < 100000 && (len > 0); s_guard++)
     {
         uint32_t chunk = (len > 256) ? 256 : len;
 
         qspi_wait_tx(instance);
         qspi_wait_cmd(instance);
+        if (qspi_timeout[instance]) return;
 
         for (uint32_t i = 0; i < chunk; i++)
             qspi_tx_buf[i] = data[i];
+        qspi_cmd_buf[0] = QSPI_CMD_TX_DATA(chunk, 8, quad, 0);
+        memory_fence();
 
         /* Enqueue TX data */
         *qreg(instance, UDMA_TX_SADDR_OFFSET) = (uint32_t)(uintptr_t)qspi_tx_buf;
@@ -271,11 +277,9 @@ void qspi_write_blocking(uint instance, const uint8_t *data,
         *qreg(instance, UDMA_TX_CFG_OFFSET)   = UDMA_CFG_EN;
 
         /* Enqueue TX_DATA command */
-        qspi_cmd_buf[0] = QSPI_CMD_TX_DATA(chunk, 8, quad, 0);
         *qreg(instance, UDMA_CMD_SADDR_OFFSET) = (uint32_t)(uintptr_t)qspi_cmd_buf;
         *qreg(instance, UDMA_CMD_SIZE_OFFSET)  = 1 * 4;
         *qreg(instance, UDMA_CMD_CFG_OFFSET)   = UDMA_CFG_EN | UDMA_CFG_SIZE_32;
-        memory_fence();
 
         qspi_wait_cmd(instance);
         qspi_wait_tx(instance);
@@ -300,17 +304,19 @@ void qspi_read_blocking(uint instance, uint8_t *data,
     SEVS_REQUIRE_NOT_NULL(data);
     if (instance > 3 || len == 0) return;
 
-    int s_guard;
-    for (s_guard = 0; s_guard < 100000 && (len > 0); s_guard++)
+    for (int s_guard = 0; s_guard < 100000 && (len > 0); s_guard++)
     {
         uint32_t chunk = (len > 256) ? 256 : len;
 
         qspi_wait_rx(instance);
         qspi_wait_cmd(instance);
+        if (qspi_timeout[instance]) return;
 
         /* Clear RX buffer */
         for (uint32_t i = 0; i < chunk; i++)
             qspi_rx_buf[i] = 0;
+        qspi_cmd_buf[0] = QSPI_CMD_RX_DATA(chunk, 8, quad, 0);
+        memory_fence();
 
         /* Enqueue RX buffer */
         *qreg(instance, UDMA_RX_SADDR_OFFSET) = (uint32_t)(uintptr_t)qspi_rx_buf;
@@ -318,16 +324,15 @@ void qspi_read_blocking(uint instance, uint8_t *data,
         *qreg(instance, UDMA_RX_CFG_OFFSET)   = UDMA_CFG_EN;
 
         /* Enqueue RX_DATA command */
-        qspi_cmd_buf[0] = QSPI_CMD_RX_DATA(chunk, 8, quad, 0);
         *qreg(instance, UDMA_CMD_SADDR_OFFSET) = (uint32_t)(uintptr_t)qspi_cmd_buf;
         *qreg(instance, UDMA_CMD_SIZE_OFFSET)  = 1 * 4;
         *qreg(instance, UDMA_CMD_CFG_OFFSET)   = UDMA_CFG_EN | UDMA_CFG_SIZE_32;
-        memory_fence();
 
         qspi_wait_cmd(instance);
         qspi_wait_rx(instance);
 
         /* Copy RX data out of IFRAM */
+        memory_fence();
         for (uint32_t i = 0; i < chunk; i++)
             data[i] = qspi_rx_buf[i];
 
@@ -363,8 +368,7 @@ void qspi_wait(uint instance)
 
     if (instance > 3) return;
 
-    int s_poll;
-    for (s_poll = 0; s_poll < 1000000; s_poll++) {
+    for (int s_poll = 0; s_poll < 1000000; s_poll++) {
         if (!qspi_busy(instance))
             return;
     }
@@ -372,12 +376,6 @@ void qspi_wait(uint instance)
 }
 
 /** @brief Report whether any bounded wait on this instance has expired.
- *
- *  Every wait loop in this driver is bounded so a hung device cannot lock
- *  the CPU. When a loop exhausts, the transfer did not complete and this
- *  returns true. The flag is sticky: it stays set until cleared by
- *  qspi_clear_timeout() or by a fresh qspi_init().
- *
  *  @param[in] instance SPI master index (0-3).
  *  @return true if a bounded wait expired since the last clear.
  *  @req REQ-DABAO-QSPI-0012 */

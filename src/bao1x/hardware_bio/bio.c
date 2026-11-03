@@ -14,11 +14,86 @@
 
 #include "hardware/bio.h"
 #include "sevs_runtime.h"
+
+/*
+ * Clock gating unit registers. boot1 leaves BIO running at 350 MHz, and
+ * reaching 700 MHz needs the fast mode divider written here before the
+ * cores are started.
+ */
+#define SFR_CGUFD_CFGFDCR_0_4_0   (*(volatile uint32_t *)(0x40040000 + 0x14))
+#define SYSCTRL_SFR_CGUSET        (*(volatile uint32_t *)(0x40040000 + 0x2c))
 /*
  * We store fclk so bio_set_target_freq() can compute dividers.
  * This is the only piece of "state" in the driver.
  */
 static uint32_t s_fclk_hz = 0;
+/** @brief Open one DMA whitelist window so BIO cores can reach a memory range.
+ *
+ * BIO load and store access to main memory is blocked by a whitelist that
+ * is empty at reset. A core reading an unlisted address gets zero back
+ * rather than a fault, which makes the failure look like a dead bus. Four
+ * windows are available.
+ *
+ * The hardware compares addr[31:12], so base and length are both counted
+ * in 4 KB pages:
+ *
+ *   match = (addr[31:12] >= base) && (addr[31:12] < base + length)
+ *
+ * The start is rounded down to a page and the end up, so a window always
+ * covers at least the range asked for.
+ *
+ * Example, opening all of SRAM:
+ *   bio_allow_range(0, 0x61000000u, 0x200000u);
+ *
+ *  @param[in] window Window index, 0 to 3.
+ *  @param[in] addr Start address.
+ *  @param[in] len Length in bytes.
+ *  @return 0 on success, -1 on a bad window index or zero length.
+ *  @req REQ-DABAO-BIO-0012 */
+int bio_allow_range(uint32_t window, uint32_t addr, uint32_t len)
+{
+    volatile uint32_t *base_reg;
+    volatile uint32_t *bounds_reg;
+    uint32_t first_page, last_page;
+
+    SEVS_ASSERT(window < 4);
+    if (window >= 4) return -1;
+    if (len == 0) return -1;
+
+    /*
+     * Never open a window over boot0, boot1 or the security region.
+     * 0x60000000 is boot0 and 0x60020000 is boot1; a BIO core with
+     * write access there can brick the part, and there is no recovery
+     * path because every recovery mechanism lives inside boot1. From
+     * 0x603DA000 up are the one way counters and key slots. The program
+     * image and runtime storage in between are allowed. The end is
+     * computed as a last byte so a length that would wrap cannot pass.
+     */
+    if (len - 1u > 0xFFFFFFFFu - addr) return -1;
+    {
+        uint32_t last = addr + (len - 1u);
+        if (last >= 0x60000000u && addr < 0x60060000u) {
+            SEVS_ASSERT(0);   /* window overlaps boot0 or boot1 */
+            return -1;
+        }
+        if (last >= 0x603DA000u && addr < 0x60400000u) {
+            SEVS_ASSERT(0);   /* window overlaps the security region */
+            return -1;
+        }
+        first_page = addr >> 12;
+        last_page  = last >> 12;
+    }
+
+    base_reg   = (volatile uint32_t *)(BIO_BDMA_BASE + 0xE0 + window * 8);
+    bounds_reg = (volatile uint32_t *)(BIO_BDMA_BASE + 0xE4 + window * 8);
+
+    *base_reg   = first_page & 0xFFFFFu;
+    *bounds_reg = (last_page - first_page + 1u) & 0xFFFFFu;
+    __asm__ volatile ("fence" ::: "memory");
+
+    return 0;
+}
+
 /** @brief Initialize the BIO coprocessor: halt all cores, fill IMEM, drain FIFOs.
  *  @param[in] fclk_hz Core clock frequency in Hz (used for divider calculations).
  *  @return 0 on success, -1 if IMEM or CFGINFO verification fails.
@@ -30,6 +105,21 @@ int bio_init(uint32_t fclk_hz)
     uint32_t i;
 
     s_fclk_hz = fclk_hz;
+
+    /*
+     * Select the BIO clock domain before anything else. boot1 hands the
+     * block over at 350 MHz; asking for more than 400 MHz switches the
+     * divider to fast mode. The threshold is a mode selection, not a
+     * rounding: 700 MHz needs fast mode, 350 MHz needs slow, and there
+     * is nothing in between.
+     */
+    if (fclk_hz > 400000000u) {
+        SFR_CGUFD_CFGFDCR_0_4_0 = 0x070001ff;   /* fast mode  */
+        SYSCTRL_SFR_CGUSET      = 0x32;
+    } else {
+        SFR_CGUFD_CFGFDCR_0_4_0 = 0x0700017f;   /* slow mode  */
+        SYSCTRL_SFR_CGUSET      = 0x32;
+    }
 
     /* Stop all cores */
     BIO_SFR_CTRL = 0x0;
@@ -105,7 +195,7 @@ int bio_init(uint32_t fclk_hz)
      * an assembler, keeping this file self-contained.
      */
     static const uint32_t mem_init[] = {
-        0x0200A023,  /* sw x0, 0x20(x0) */
+        0x02002023,  /* sw x0, 0x20(x0) */
         0x02002283,  /* lw t0, 0x20(x0) */
         0x61200137,  /* lui sp, 0x61200 */
         0xFFC10113,  /* addi sp, sp, -4 */
@@ -178,6 +268,9 @@ int bio_init(uint32_t fclk_hz)
 int bio_load_code(uint32_t core, const uint8_t *code, uint32_t len)
 {
     SEVS_REQUIRE_NOT_NULL(code);
+    SEVS_ASSERT(core < 4);
+    SEVS_ASSERT(len <= BIO_IMEM_SIZE);
+    if (core >= 4 || len == 0 || len > BIO_IMEM_SIZE) return -1;
     volatile uint32_t *imem = bio_imem(core);
     uint32_t i;
     uint32_t full_words = len / 4;
@@ -237,6 +330,9 @@ int bio_load_code(uint32_t core, const uint8_t *code, uint32_t len)
 int bio_load_code_words(uint32_t core, const uint32_t *words, uint32_t num_words)
 {
     SEVS_REQUIRE_NOT_NULL(words);
+    SEVS_ASSERT(core < 4);
+    SEVS_ASSERT(num_words <= BIO_IMEM_WORDS);
+    if (core >= 4 || num_words == 0 || num_words > BIO_IMEM_WORDS) return -1;
     volatile uint32_t *imem = bio_imem(core);
     uint32_t i;
 

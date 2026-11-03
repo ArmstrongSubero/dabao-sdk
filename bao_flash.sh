@@ -1,25 +1,25 @@
 #!/bin/bash
-# bao.sh - Unified build and flash tool for the Dabao SDK
+# bao_flash.sh: Unified build and flash tool for the Dabao SDK
 #
 # Usage:
-#   ./bao.sh build <example>                         Build only
-#   ./bao.sh flash <port> <example>                  Flash (normal, bootwait on)
-#   ./bao.sh flash <port> <example> --persistent     Flash + auto-run on reset
-#   ./bao.sh flash <port> <example> --icsp <dtr>     Zero-button via DTR reset
-#   ./bao.sh flash <port> <example> --icsp-single    Single-port ICSP
-#   ./bao.sh run <port> <example>                    Build + flash in one shot
-#   ./bao.sh run <port> <example> --persistent       Build + flash persistent
-#   ./bao.sh run <port> <example> --icsp <dtr>       Build + flash ICSP
-#   ./bao.sh run <port> <example> --icsp-single      Build + flash single-port ICSP
-#   ./bao.sh list                                    List available examples
+#   ./bao_flash.sh build <example>                         Build only
+#   ./bao_flash.sh flash <port> <example>                  Flash (normal, bootwait on)
+#   ./bao_flash.sh flash <port> <example> --persistent     Flash + auto-run on reset
+#   ./bao_flash.sh flash <port> <example> --icsp <dtr>     Zero-button via DTR reset
+#   ./bao_flash.sh flash <port> <example> --icsp-single    Single-port ICSP
+#   ./bao_flash.sh run <port> <example>                    Build + flash in one shot
+#   ./bao_flash.sh run <port> <example> --persistent       Build + flash persistent
+#   ./bao_flash.sh run <port> <example> --icsp <dtr>       Build + flash ICSP
+#   ./bao_flash.sh run <port> <example> --icsp-single      Build + flash single-port ICSP
+#   ./bao_flash.sh list                                    List available examples
 #
 # Examples:
-#   ./bao.sh build blink
-#   ./bao.sh flash /dev/ttyACM0 blink
-#   ./bao.sh flash /dev/ttyACM0 blink --persistent
-#   ./bao.sh flash /dev/ttyACM0 blink --icsp /dev/ttyUSB0
-#   ./bao.sh flash /dev/ttyUSB0 blink --icsp-single
-#   ./bao.sh run /dev/ttyACM0 hello_uart
+#   ./bao_flash.sh build blink
+#   ./bao_flash.sh flash /dev/ttyACM0 blink
+#   ./bao_flash.sh flash /dev/ttyACM0 blink --persistent
+#   ./bao_flash.sh flash /dev/ttyACM0 blink --icsp /dev/ttyUSB0
+#   ./bao_flash.sh flash /dev/ttyUSB0 blink --icsp-single
+#   ./bao_flash.sh run /dev/ttyACM0 hello_uart
 
 set -e
 
@@ -89,7 +89,10 @@ if [ -z "$CROSS" ]; then
 fi
 
 ARCH="-march=rv32imac_zicsr_zifencei -mabi=ilp32"
-CFLAGS="-Os -Wall -Wextra -ffreestanding -nostdlib -g"
+# -fno-tree-loop-distribute-patterns: at -O2 and above GCC turns the SDK's
+# own memset/memcpy loops into calls to themselves, the stack runs through
+# SRAM, and that build killed a board. Rovari Studio passes the same flag.
+CFLAGS="-Os -Wall -Wextra -ffreestanding -nostdlib -fno-tree-loop-distribute-patterns -g"
 
 INC="-Isrc/common/bao_base/include"
 INC="$INC -Isrc/common/bao_stdlib/include"
@@ -110,6 +113,8 @@ INC="$INC -Isrc/bao1x/hardware_irq/include"
 INC="$INC -Isrc/bao1x/hardware_rram/include"
 INC="$INC -Isrc/bao1x/hardware_aes/include"
 INC="$INC -Isrc/bao1x/hardware_sha/include"
+INC="$INC -Isrc/bao1x/hardware_pke/include"
+INC="$INC -Isrc/bao1x/hardware_alu/include"
 INC="$INC -Isrc/bao1x/hardware_qspi/include"
 INC="$INC -Isrc/bao1x/hardware_w25q/include"
 INC="$INC -Isrc/bao1x/hardware_reset/include"
@@ -134,25 +139,30 @@ SDK_SRCS="
     src/bao1x/hardware_rram/rram.c
     src/bao1x/hardware_aes/aes.c
     src/bao1x/hardware_sha/sha.c
+    src/bao1x/hardware_pke/pke.c
+    src/bao1x/hardware_pke/pke_ecc.c
+    src/bao1x/hardware_alu/alu.c
     src/bao1x/hardware_qspi/qspi.c
     src/bao1x/hardware_w25q/w25q.c
     src/common/bao_stdlib/stdio.c
     src/common/bao_stdlib/delay.c
     src/common/bao_stdlib/stdlib.c
+    src/common/bao_stdlib/events.c
+    src/common/bao_stdlib/forbidden.c
     src/sevs/sevs_assert_target.c
 "
 
 # ---- Functions ----
 
 usage() {
-    echo "bao.sh - Dabao SDK build and flash tool"
+    echo "bao_flash.sh: Dabao SDK build and flash tool"
     echo ""
     echo "Usage:"
-    echo "  ./bao.sh build <example>"
-    echo "  ./bao.sh flash <port> <example> [--persistent|--icsp <dtr>|--icsp-single]"
-    echo "  ./bao.sh run   <port> <example> [--persistent|--icsp <dtr>|--icsp-single]"
-    echo "  ./bao.sh verify"
-    echo "  ./bao.sh list"
+    echo "  ./bao_flash.sh build <example>"
+    echo "  ./bao_flash.sh flash <port> <example> [--persistent|--icsp <dtr>|--icsp-single]"
+    echo "  ./bao_flash.sh run   <port> <example> [--persistent|--icsp <dtr>|--icsp-single]"
+    echo "  ./bao_flash.sh verify"
+    echo "  ./bao_flash.sh list"
     echo ""
     echo "Flash modes:"
     echo "  (default)       Normal flash, bootwait on. Press RESET to re-enter boot1."
@@ -161,10 +171,10 @@ usage() {
     echo "  --icsp-single   Single-port ICSP. CP2104 DTR+TX/RX, no USB cable needed."
     echo ""
     echo "Examples:"
-    echo "  ./bao.sh build blink"
-    echo "  ./bao.sh flash /dev/ttyACM0 blink"
-    echo "  ./bao.sh run /dev/ttyACM0 hello_uart --persistent"
-    echo "  ./bao.sh run /dev/ttyACM0 blink --icsp /dev/ttyUSB0"
+    echo "  ./bao_flash.sh build blink"
+    echo "  ./bao_flash.sh flash /dev/ttyACM0 blink"
+    echo "  ./bao_flash.sh run /dev/ttyACM0 hello_uart --persistent"
+    echo "  ./bao_flash.sh run /dev/ttyACM0 blink --icsp /dev/ttyUSB0"
     exit 0
 }
 
@@ -217,13 +227,16 @@ do_build() {
 
     mkdir -p build
 
+    echo "[0/4] Checking $EXAMPLE for forbidden addresses ..."
+    python3 tools/audit_addresses.py "$EXAMPLE_DIR" || exit 1
+
     echo "[1/4] Assembling startup ..."
     ${CROSS}gcc $ARCH -g -c -o build/crt0.o src/runtime/crt0.S
 
     echo "[2/4] Compiling SDK ..."
     for f in $SDK_SRCS; do
-        obj="build/${f%.c}.o"
-        obj="${obj//\//_}"
+        obj="${f%.c}.o"
+        obj="build/${obj//\//_}"
 
         ${CROSS}gcc $ARCH $CFLAGS $INC -c -o "$obj" "$f"
 
@@ -287,7 +300,7 @@ do_flash() {
     UF2="build/${EXAMPLE}.uf2"
 
     if [ ! -f "$UF2" ]; then
-        echo "Error: $UF2 not found. Run \"./bao.sh build $EXAMPLE\" first."
+        echo "Error: $UF2 not found. Run \"./bao_flash.sh build $EXAMPLE\" first."
         exit 1
     fi
 
@@ -343,21 +356,21 @@ shift
 case "$CMD" in
     build)
         if [ -z "$1" ]; then
-            echo "Usage: ./bao.sh build <example>"
+            echo "Usage: ./bao_flash.sh build <example>"
             exit 1
         fi
         do_build "$1"
         ;;
     flash)
         if [ -z "$2" ]; then
-            echo "Usage: ./bao.sh flash <port> <example> [--persistent|--icsp <dtr>|--icsp-single]"
+            echo "Usage: ./bao_flash.sh flash <port> <example> [--persistent|--icsp <dtr>|--icsp-single]"
             exit 1
         fi
         do_flash "$@"
         ;;
     run)
         if [ -z "$2" ]; then
-            echo "Usage: ./bao.sh run <port> <example> [--persistent|--icsp <dtr>|--icsp-single]"
+            echo "Usage: ./bao_flash.sh run <port> <example> [--persistent|--icsp <dtr>|--icsp-single]"
             exit 1
         fi
         PORT="$1"

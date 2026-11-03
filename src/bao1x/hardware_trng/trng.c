@@ -49,7 +49,7 @@ int trng_generate(uint32_t *buf, uint32_t word_count)
     TRNG_CRSRC    = 0xFFFF;       /* all ring oscillator sources */
     TRNG_CRANA    = 0xFFFF;
     TRNG_OPT      = 0x10040;     /* RNG B output, generate 1024 bytes */
-    TRNG_POSTPROC = 0xF821;      /* post-processing with health test */
+    TRNG_POSTPROC = 0xF821;      /* gen on, postproc opt 2, health test off */
     TRNG_CHAIN0   = 0xFFFFFFFE;
     TRNG_CHAIN1   = 0xFFFFFFFC;
     memory_fence();

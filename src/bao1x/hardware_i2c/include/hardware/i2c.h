@@ -70,18 +70,27 @@ void i2c_async_wait(uint instance);
 /* Copy received data from internal RX buffer after async transfer. */
 void i2c_async_read(uint instance, uint8_t *dst, uint32_t len);
 
+/*
+ * Result of the last async transaction. I2C_OK once it completed with an
+ * acknowledge, I2C_ERR_NACK if the slave did not answer, I2C_ERR_TIMEOUT
+ * while a channel is still busy. Check this before trusting
+ * i2c_async_read(), since a NACK leaves the buffer holding 0xFF.
+ */
+int i2c_async_status(uint instance);
+
 /* I2C command opcodes (for building custom sequences) */
 /*
  * Maximum payload per transaction. The driver stages data through
  * fixed IFRAM buffers of this size; longer transfers must be split.
  */
-#define I2C_MAX_XFER        64
+#define I2C_MAX_XFER        256
 
 /* Return codes for the blocking transfer functions. */
 #define I2C_OK               0
 #define I2C_ERR_LEN        (-1)   /* length exceeds I2C_MAX_XFER */
 #define I2C_ERR_TIMEOUT    (-2)   /* DMA channel never went idle   */
 #define I2C_ERR_NACK       (-3)   /* slave did not acknowledge     */
+#define I2C_ERR_INVALID    (-4)   /* instance out of range         */
 
 #define I2C_CMD_SHIFT       28
 #define I2C_CMD_CFG_ID      0x0E

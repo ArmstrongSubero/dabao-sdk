@@ -17,7 +17,7 @@ Signature block layout (768 bytes) from bao1x-api/src/signatures.rs:
   0x088   8     magic ("yumyBao3")
   0x090   4     signed_len
   0x094   4     function_code (6 = Baremetal)
-  0x098   4     anti_rollback (0)
+  0x098   4     anti_rollback (1, also a one way counter on the board)
   0x09C   16    min_semver (zeros)
   0x0AC   16    semver (zeros)
   0x0BC   144   pubkeys (4 x 36 bytes)

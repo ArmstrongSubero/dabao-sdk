@@ -30,8 +30,10 @@
 #define UART_ERROR_TIMEOUT        -5
 #endif
 
-/* TX DMA buffer in IFRAM. The UDMA engine cannot read from normal SRAM. */
-static uint8_t uart_tx_buf[UART_TX_BUF_SIZE]
+/* One TX DMA buffer per instance, in IFRAM. The UDMA engine cannot read
+ * from normal SRAM, and a shared buffer would let a console print replace
+ * the bytes another UART is still sending. */
+static uint8_t uart_tx_buf[UART_INSTANCE_COUNT][UART_TX_BUF_SIZE]
     __attribute__((section(".dma_buffers")));
 
 /* Detected peripheral clock, set on first uart_init() call. */
@@ -233,13 +235,13 @@ void uart_write(uint instance, const uint8_t *data, uint32_t len)
         }
 
         for (i = 0u; i < chunk; i++) {
-            uart_tx_buf[i] = data[i];
+            uart_tx_buf[instance][i] = data[i];
         }
+        memory_fence();
 
-        *tx_addr = (uint32_t)(uintptr_t)uart_tx_buf;
+        *tx_addr = (uint32_t)(uintptr_t)uart_tx_buf[instance];
         *tx_size = chunk;
         *tx_cfg = UDMA_CFG_EN | UDMA_CFG_SIZE_8;
-        memory_fence();
 
         for (poll = 0u;
              ((poll < UART_POLL_LIMIT) && ((*tx_cfg & UDMA_CFG_EN) != 0u));
@@ -449,16 +451,16 @@ int uart_write_async(uint instance, const uint8_t *data, uint32_t len)
     }
 
     for (i = 0u; i < len; i++) {
-        uart_tx_buf[i] = data[i];
+        uart_tx_buf[instance][i] = data[i];
     }
+    memory_fence();
 
     s_uart_tx_busy[instance] = true;
     s_uart_tx_notified[instance] = false;
 
-    *tx_addr = (uint32_t)(uintptr_t)uart_tx_buf;
+    *tx_addr = (uint32_t)(uintptr_t)uart_tx_buf[instance];
     *tx_size = len;
     *tx_cfg = UDMA_CFG_EN | UDMA_CFG_SIZE_8;
-    memory_fence();
 
     return UART_OK;
 }

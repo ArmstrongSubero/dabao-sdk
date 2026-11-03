@@ -15,7 +15,15 @@
  *   PC9  = QSPI1_D2    (AF1)
  *   PC10 = QSPI1_D3    (AF1)
  *   PC12 = QSPI1_CS0   (AF1)
- *   PC13 = QSPI1_CS1   (AF1)
+ *   PC13 = QSPI1_CS1   (not configured, see below)
+ *
+ * PC13 is CS1 in the pin mux but qspi_init deliberately leaves it alone.
+ * On Dabao that pin is the USB SE0 line and the PROG button, which boot1
+ * reads to enter the bootloader. Muxing it for a chip select removes the
+ * only way back into the bootloader on a board flashed in persistent mode,
+ * and it would happen to every caller of qspi_init even if CS1 is never
+ * selected. Single device operation on CS0 is unaffected. A design that
+ * needs two devices on one bus must mux PC13 itself and accept losing PROG.
  *
  * Usage:
  *   qspi_init(1, 10);   // SPIM1, clkdiv=10 (~5 MHz)
@@ -37,7 +45,8 @@ extern "C" {
 /*
  * Initialize SPIM instance for QSPI operation.
  * Sets up UDMA clock gate and pin muxing.
- * For instance 1 (Dabao QSPI port), configures PC7-PC13 as AF1.
+ * For instance 1 (Dabao QSPI port), configures PC7-PC12 as AF1.
+ * PC13 (CS1) is left as the bootloader configured it.
  *
  * clkdiv: SPI clock = perclk / (2 * (clkdiv + 1))
  *   clkdiv=4  -> ~10 MHz
@@ -48,7 +57,9 @@ void qspi_init(uint instance, uint8_t clkdiv);
 
 /*
  * Assert chip select (active low).
- * cs: 0 or 1 for hardware CS0/CS1.
+ * cs: use 0 for hardware CS0. CS1 is not pin muxed by qspi_init on Dabao
+ *     because PC13 is SE0 and PROG, so the command is issued but the pin
+ *     does not drive.
  */
 void qspi_select(uint instance, uint8_t cs);
 
@@ -164,8 +175,9 @@ void qspi_clear_timeout(uint instance);
      | (((bitsword) - 1) << 16) | (((words) - 1) & 0xFFFF))
 
 /* End transfer, deassert CS */
+/* Bit 0 raises an event, bit 1 keeps CS asserted (udma_spim_ctrl.sv). */
 #define QSPI_CMD_EOT(evt, cs_keep) \
-    ((0x9 << 28) | ((evt) << 1) | ((cs_keep) & 1))
+    ((0x9 << 28) | (((cs_keep) & 1) << 1) | ((evt) & 1))
 
 /* Full duplex (always single-line, bit 27 is unused) */
 #define QSPI_CMD_FULL_DUPLEX(words, bitsword, lsbfirst) \

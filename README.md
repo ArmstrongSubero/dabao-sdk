@@ -115,6 +115,18 @@ The adapter toggles DTR to reset the board into boot1, then the firmware is flas
 bao_flash flash COM9 blink --icsp COM4
 ```
 
+## Board State Out of the Box
+
+The Dabao ships with `bootwait` enabled, so it comes up in the boot1 REPL
+ready to program rather than running application code. You do not need to
+hold any buttons for a first flash.
+
+After flashing, `bootwait` stays enabled and pressing RESET returns you to
+the boot1 REPL, so you can reflash without touching buttons. Use
+`--persistent` if you want the firmware to run automatically on every reset
+and power cycle instead.
+
+
 ## Drivers
 
 | Driver  | Header               | Description                                                       |

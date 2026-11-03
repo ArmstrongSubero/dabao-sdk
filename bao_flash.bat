@@ -2,15 +2,15 @@
 REM bao.bat - Unified build and flash tool for the Dabao SDK
 REM
 REM Usage:
-REM   bao build <example>                           Build only
-REM   bao flash <port> <example>                    Flash (normal, bootwait on)
-REM   bao flash <port> <example> --persistent       Flash + auto-run on reset
-REM   bao flash <port> <example> --icsp <dtr>       Zero-button via DTR reset
-REM   bao flash <port> <example> --icsp-single      Single-port ICSP
-REM   bao run <port> <example>                      Build + flash in one shot
-REM   bao run <port> <example> --persistent         Build + flash persistent
-REM   bao run <port> <example> --icsp <dtr>         Build + flash ICSP
-REM   bao run <port> <example> --icsp-single        Build + flash single-port ICSP
+REM   bao_flash build <example>                           Build only
+REM   bao_flash flash <port> <example>                    Flash (normal, bootwait on)
+REM   bao_flash flash <port> <example> --persistent       Flash + auto-run on reset
+REM   bao_flash flash <port> <example> --icsp <dtr>       Zero-button via DTR reset
+REM   bao_flash flash <port> <example> --icsp-single      Single-port ICSP
+REM   bao_flash run <port> <example>                      Build + flash in one shot
+REM   bao_flash run <port> <example> --persistent         Build + flash persistent
+REM   bao_flash run <port> <example> --icsp <dtr>         Build + flash ICSP
+REM   bao_flash run <port> <example> --icsp-single        Build + flash single-port ICSP
 REM   bao list                                      List available examples
 
 setlocal enabledelayedexpansion
@@ -41,9 +41,9 @@ REM ================================================================
 echo bao.bat - Dabao SDK build and flash tool
 echo.
 echo Usage:
-echo   bao build ^<example^>
-echo   bao flash ^<port^> ^<example^> [--persistent^|--icsp ^<dtr^>^|--icsp-single]
-echo   bao run   ^<port^> ^<example^> [--persistent^|--icsp ^<dtr^>^|--icsp-single]
+echo   bao_flash build ^<example^>
+echo   bao_flash flash ^<port^> ^<example^> [--persistent^|--icsp ^<dtr^>^|--icsp-single]
+echo   bao_flash run   ^<port^> ^<example^> [--persistent^|--icsp ^<dtr^>^|--icsp-single]
 echo   bao verify
 echo   bao list
 echo.
@@ -54,10 +54,10 @@ echo   --icsp ^<dtr^>    Zero-button reflash. DTR port resets board, CDC port fl
 echo   --icsp-single   Single-port ICSP. CP2104 DTR+TX/RX, no USB cable needed.
 echo.
 echo Examples:
-echo   bao build blink
-echo   bao flash COM9 blink
-echo   bao run COM9 hello_uart --persistent
-echo   bao run COM9 blink --icsp COM4
+echo   bao_flash build blink
+echo   bao_flash flash COM9 blink
+echo   bao_flash run COM9 hello_uart --persistent
+echo   bao_flash run COM9 blink --icsp COM4
 goto :end
 
 REM ================================================================
@@ -80,7 +80,7 @@ goto :end
 REM ================================================================
 :cmd_build
 if "%~2"=="" (
-    echo Usage: bao build ^<example^>
+    echo Usage: bao_flash build ^<example^>
     goto :end
 )
 set "B_EXAMPLE=%~2"
@@ -95,7 +95,7 @@ goto :end
 REM ================================================================
 :cmd_flash
 if "%~3"=="" (
-    echo Usage: bao flash ^<port^> ^<example^> [--persistent^|--icsp ^<dtr^>^|--icsp-single]
+    echo Usage: bao_flash flash ^<port^> ^<example^> [--persistent^|--icsp ^<dtr^>^|--icsp-single]
     goto :end
 )
 set "F_PORT=%~2"
@@ -107,7 +107,7 @@ goto :do_flash
 REM ================================================================
 :cmd_run
 if "%~3"=="" (
-    echo Usage: bao run ^<port^> ^<example^> [--persistent^|--icsp ^<dtr^>^|--icsp-single]
+    echo Usage: bao_flash run ^<port^> ^<example^> [--persistent^|--icsp ^<dtr^>^|--icsp-single]
     goto :end
 )
 set "B_EXAMPLE=%~3"
@@ -190,7 +190,10 @@ if not defined CROSS (
 )
 
 set "ARCH=-march=rv32imac_zicsr_zifencei -mabi=ilp32"
-set "CFLAGS=-Os -Wall -Wextra -ffreestanding -nostdlib -g"
+REM -fno-tree-loop-distribute-patterns: at -O2 and above GCC turns the SDK's
+REM own memset/memcpy loops into calls to themselves, the stack runs through
+REM SRAM, and that build killed a board. Rovari Studio passes the same flag.
+set "CFLAGS=-Os -Wall -Wextra -ffreestanding -nostdlib -fno-tree-loop-distribute-patterns -g"
 
 set "INC=-Isrc\common\bao_base\include"
 set "INC=!INC! -Isrc\common\bao_stdlib\include"
@@ -211,6 +214,8 @@ set "INC=!INC! -Isrc\bao1x\hardware_irq\include"
 set "INC=!INC! -Isrc\bao1x\hardware_rram\include"
 set "INC=!INC! -Isrc\bao1x\hardware_aes\include"
 set "INC=!INC! -Isrc\bao1x\hardware_sha\include"
+set "INC=!INC! -Isrc\bao1x\hardware_pke\include"
+set "INC=!INC! -Isrc\bao1x\hardware_alu\include"
 set "INC=!INC! -Isrc\bao1x\hardware_qspi\include"
 set "INC=!INC! -Isrc\bao1x\hardware_w25q\include"
 set "INC=!INC! -Isrc\bao1x\hardware_reset\include"
@@ -225,6 +230,10 @@ echo ============================================
 echo.
 
 if not exist build mkdir build
+
+echo [0/4] Checking %B_EXAMPLE% for forbidden addresses ...
+python tools\audit_addresses.py "%EXAMPLE_DIR%"
+if errorlevel 1 goto :fail
 
 echo [1/4] Assembling startup ...
 "!CROSS!gcc" !ARCH! -g -c -o build\crt0.o src\runtime\crt0.S
@@ -261,6 +270,12 @@ if errorlevel 1 goto :fail
 if errorlevel 1 goto :fail
 "!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\sha.o src\bao1x\hardware_sha\sha.c
 if errorlevel 1 goto :fail
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\pke.o src\bao1x\hardware_pke\pke.c
+if errorlevel 1 goto :fail
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\pke_ecc.o src\bao1x\hardware_pke\pke_ecc.c
+if errorlevel 1 goto :fail
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\alu.o src\bao1x\hardware_alu\alu.c
+if errorlevel 1 goto :fail
 "!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\qspi.o src\bao1x\hardware_qspi\qspi.c
 if errorlevel 1 goto :fail
 "!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\w25q.o src\bao1x\hardware_w25q\w25q.c
@@ -270,6 +285,10 @@ if errorlevel 1 goto :fail
 "!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\delay.o src\common\bao_stdlib\delay.c
 if errorlevel 1 goto :fail
 "!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\stdlib.o src\common\bao_stdlib\stdlib.c
+if errorlevel 1 goto :fail
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\events.o src\common\bao_stdlib\events.c
+if errorlevel 1 goto :fail
+"!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\forbidden.o src\common\bao_stdlib\forbidden.c
 if errorlevel 1 goto :fail
 "!CROSS!gcc" !ARCH! !CFLAGS! !INC! -c -o build\sevs_assert_target.o src\sevs\sevs_assert_target.c
 if errorlevel 1 goto :fail
@@ -304,7 +323,7 @@ if "%B_EXAMPLE%"=="fatfs" (
 )
 
 echo [4/4] Linking %B_EXAMPLE%.uf2 ...
-"!CROSS!gcc" !ARCH! -T bao1x.ld -nostdlib -nostartfiles -Wl,--gc-sections -o build\%B_EXAMPLE%.elf build\crt0.o build\gpio.o build\uart.o build\pwm.o build\spi.o build\i2c.o build\adc.o build\trng.o build\wdt.o build\rtc.o build\bio.o build\bio_dma.o build\irq.o build\rram.o build\aes.o build\sha.o build\qspi.o build\w25q.o build\stdio.o build\delay.o build\stdlib.o build\sevs_assert_target.o build\main.o !EXTRA_OBJS! -lgcc
+"!CROSS!gcc" !ARCH! -T bao1x.ld -nostdlib -nostartfiles -Wl,--gc-sections -o build\%B_EXAMPLE%.elf build\crt0.o build\gpio.o build\uart.o build\pwm.o build\spi.o build\i2c.o build\adc.o build\trng.o build\wdt.o build\rtc.o build\bio.o build\bio_dma.o build\irq.o build\rram.o build\aes.o build\sha.o build\pke.o build\pke_ecc.o build\alu.o build\qspi.o build\w25q.o build\stdio.o build\delay.o build\stdlib.o build\events.o build\forbidden.o build\sevs_assert_target.o build\main.o !EXTRA_OBJS! -lgcc
 if errorlevel 1 goto :fail
 
 "!CROSS!objcopy" -O binary build\%B_EXAMPLE%.elf build\%B_EXAMPLE%.bin
@@ -330,7 +349,7 @@ REM ================================================================
 set "UF2=build\%F_EXAMPLE%.uf2"
 
 if not exist "%UF2%" (
-    echo Error: %UF2% not found. Run "bao build %F_EXAMPLE%" first.
+    echo Error: %UF2% not found. Run "bao_flash build %F_EXAMPLE%" first.
     goto :end
 )
 
@@ -350,7 +369,7 @@ goto :end
 :flash_icsp
 if "%F_ARG%"=="" (
     echo Error: --icsp requires a DTR port argument
-    echo Usage: bao flash ^<cdc_port^> ^<example^> --icsp ^<dtr_port^>
+    echo Usage: bao_flash flash ^<cdc_port^> ^<example^> --icsp ^<dtr_port^>
     goto :end
 )
 echo Flashing %UF2% via %F_ARG% + %F_PORT% (ICSP mode) ...

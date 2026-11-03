@@ -11,7 +11,7 @@
 #include "hardware/regs/pwm.h"
 #include "sevs_runtime.h"
 
-/* Per-slice state: period (counter top value) */
+/* Per-slice state: period in ticks (counter top is period - 1) */
 static uint16_t slice_period[4];
 
 static inline volatile uint32_t *pwm_reg(uint slice, uint offset)
@@ -45,7 +45,7 @@ void pwm_init_pin(uint port, uint pin)
 /** @brief Initialize a PWM slice at the given frequency and start it.
  *  @param[in] slice PWM slice index (0-3).
  *  @param[in] freq_hz Desired output frequency in Hz.
- *  @return Actual period (counter top) value.
+ *  @return Actual period in ticks (100 percent duty value).
  *  @req REQ-DABAO-PWM-0002 */
 uint16_t pwm_init(uint slice, uint32_t freq_hz)
 {
@@ -99,7 +99,12 @@ uint16_t pwm_init(uint slice, uint32_t freq_hz)
         period = 65535;
     }
 
-    if (period == 0) period = 1;
+    /* The counter runs 0..top inclusive, so a period of N ticks needs
+     * top = N - 1. Writing N as the top made every frequency one tick
+     * slow (and 50% duty slightly under 50%). A period of 1 tick cannot
+     * be expressed with a distinct set and clear point, so 2 is the
+     * smallest period used. */
+    if (period < 2) period = 2;
 
     slice_period[slice] = (uint16_t)period;
 
@@ -112,17 +117,17 @@ uint16_t pwm_init(uint slice, uint32_t freq_hz)
      * PRESC: divide PCLK by (prescaler + 1).
      */
     *pwm_reg(slice, PWM_CONFIG_OFFSET) = PWM_CFG_CLKSEL_REF
-                                       | PWM_CFG_UPDOWN_UPDN
+                                       | PWM_CFG_UPDOWN_UP
                                        | PWM_CFG_PRESC(prescaler);
 
-    /* Counter range: 0 to period */
-    *pwm_reg(slice, PWM_THRESHOLD_OFFSET) = PWM_THRESHOLD_PACK(0, period);
+    /* Counter range: 0 to period - 1, which is period ticks. */
+    *pwm_reg(slice, PWM_THRESHOLD_OFFSET) = PWM_THRESHOLD_PACK(0, period - 1);
 
-    /* All channels start at 0% duty */
-    *pwm_reg(slice, PWM_TH_CH0_OFFSET) = PWM_TH_MODE_SET_CLR | 0;
-    *pwm_reg(slice, PWM_TH_CH1_OFFSET) = PWM_TH_MODE_SET_CLR | 0;
-    *pwm_reg(slice, PWM_TH_CH2_OFFSET) = PWM_TH_MODE_SET_CLR | 0;
-    *pwm_reg(slice, PWM_TH_CH3_OFFSET) = PWM_TH_MODE_SET_CLR | 0;
+    /* All channels start at 0% duty: clear at counter 0, never set. */
+    *pwm_reg(slice, PWM_TH_CH0_OFFSET) = PWM_TH_MODE_CLEAR | 0;
+    *pwm_reg(slice, PWM_TH_CH1_OFFSET) = PWM_TH_MODE_CLEAR | 0;
+    *pwm_reg(slice, PWM_TH_CH2_OFFSET) = PWM_TH_MODE_CLEAR | 0;
+    *pwm_reg(slice, PWM_TH_CH3_OFFSET) = PWM_TH_MODE_CLEAR | 0;
 
     memory_fence();
 
@@ -149,8 +154,26 @@ void pwm_set_duty(uint slice, uint channel, uint16_t duty)
     if (duty > slice_period[slice])
         duty = slice_period[slice];
 
+    /*
+     * SET_CLR sets the output at counter 0 and clears it at the compare
+     * match. The two ends of the range collide with that: a compare of
+     * 0 puts the set and the clear on the same tick, and a compare at
+     * the top used to coincide with the wrap. Both were seen to glitch
+     * on hardware (the breathing example flashed at the ends). The ends
+     * are therefore produced as constant levels: 0% clears at counter 0
+     * and never sets, 100% sets at counter 0 and never clears.
+     */
+    uint32_t val;
+    if (duty == 0) {
+        val = PWM_TH_MODE_CLEAR | 0;
+    } else if (duty >= slice_period[slice]) {
+        val = PWM_TH_MODE_SET | 0;
+    } else {
+        val = PWM_TH_MODE_SET_CLR | (duty & 0xFFFF);
+    }
+
     uint offset = PWM_TH_CH0_OFFSET + channel * 4;
-    *pwm_reg(slice, offset) = PWM_TH_MODE_SET_CLR | (duty & 0xFFFF);
+    *pwm_reg(slice, offset) = val;
     *pwm_reg(slice, PWM_CMD_OFFSET) = PWM_CMD_UPDATE;
 }
 

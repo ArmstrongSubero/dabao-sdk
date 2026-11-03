@@ -53,9 +53,12 @@
 /* Secure Crypto Engine */
 #define SCE_BASE                0x40020000UL
 #define SCE_CTRL_BASE           0x40028000UL
+#define SCE_SDMA_BASE           0x40029000UL
 #define SCE_HASH_BASE           0x4002B000UL
+#define SCE_PKE_BASE            0x4002C000UL
 #define SCE_AES_BASE            0x4002D000UL
 #define SCE_TRNG_BASE           0x4002E000UL
+#define SCE_ALU_BASE            0x4002F000UL
 
 /* Timers */
 #define D11CTIME_BASE           0xE0000000UL

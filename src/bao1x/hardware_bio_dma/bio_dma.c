@@ -71,12 +71,15 @@ void bio_dma_init(void)
     memory_fence();
 
     /*
-     * Disable BIO bus access filters.
-     * By default, the BIO cores cannot access SRAM or peripherals.
-     * Set DISABLE_FILTER_MEM (bit 7) and DISABLE_FILTER_PERI (bit 6)
-     * in SFR_CONFIG to allow full bus access.
+     * Open the memory whitelist for the regions a copy may touch: SRAM,
+     * both IFRAM banks, and the program and runtime storage part of RRAM.
+     * The filters stay on, so core 3 can never reach boot0, boot1, the
+     * security region or any peripheral register, whatever addresses it
+     * is handed.
      */
-    BIO_SFR_CONFIG |= (1 << 7) | (1 << 6);
+    bio_allow_range(0, 0x61000000u, 0x200000u);
+    bio_allow_range(1, 0x50000000u, 0x40000u);
+    bio_allow_range(2, 0x60060000u, 0x603DA000u - 0x60060000u);
     memory_fence();
 
     /* Load DMA program into Core 3's instruction memory */
@@ -90,8 +93,8 @@ void bio_dma_init(void)
     BIO_SFR_EVENT_CLR = 0xFFFFFFFF;
     memory_fence();
 
-    /* Clear FIFOs for Core 3 */
-    BIO_SFR_FIFO_CLR = (1 << DMA_CORE);
+    /* Clear FIFO0, FIFO1 and FIFO2, which carry the transfer parameters */
+    BIO_SFR_FIFO_CLR = 0x7;
     memory_fence();
 
     /* Start Core 3 without disturbing other cores */
@@ -102,16 +105,25 @@ void bio_dma_init(void)
 }
 
 /** @brief Begin a DMA transfer by writing src, dst, and length to the BIO FIFOs.
- *  @param[in] dst Destination address.
- *  @param[in] src Source address.
- *  @param[in] len Transfer length in bytes (must be word-aligned).
+ *  @param[in] dst Destination address, word aligned.
+ *  @param[in] src Source address, word aligned.
+ *  @param[in] len Transfer length in bytes, a multiple of 4.
+ *  @return 0 if the transfer started, -1 if the arguments were refused.
  *  @req REQ-DABAO-BIO-DMA-0002 */
-void bio_dma_start(void *dst, const void *src, uint32_t len)
+int bio_dma_start(void *dst, const void *src, uint32_t len)
 {
     SEVS_REQUIRE_NOT_NULL(dst);
     SEVS_REQUIRE_NOT_NULL(src);
+    SEVS_ASSERT((len & 3u) == 0u);
     if (!s_dma_initialized) bio_dma_init();
-    if (len == 0) return;
+    if (len == 0) return 0;
+
+    /* The copy loop exits only when src reaches exactly src + len, so a
+     * length that is not a multiple of 4 would never stop. */
+    if ((len & 3u) != 0u) return -1;
+    if (((uintptr_t)dst & 3u) != 0u || ((uintptr_t)src & 3u) != 0u) return -1;
+    if (len > 0xFFFFFFFFu - (uint32_t)(uintptr_t)src) return -1;
+    if (len > 0xFFFFFFFFu - (uint32_t)(uintptr_t)dst) return -1;
 
     /*
      * Flush CPU data cache before DMA so the BIO core reads
@@ -132,9 +144,10 @@ void bio_dma_start(void *dst, const void *src, uint32_t len)
      * Order matters: the BIO program reads TXF2 first (src),
      * then TXF1 (dst), then TXF0 (byte count, triggers the copy).
      */
-    BIO_SFR_TXF2 = (uint32_t)src;
-    BIO_SFR_TXF1 = (uint32_t)dst;
+    BIO_SFR_TXF2 = (uint32_t)(uintptr_t)src;
+    BIO_SFR_TXF1 = (uint32_t)(uintptr_t)dst;
     BIO_SFR_TXF0 = len;
+    return 0;
 }
 
 /** @brief Check whether a BIO DMA transfer is still in progress.
@@ -165,14 +178,16 @@ void bio_dma_wait(void)
 }
 
 /** @brief Copy memory using BIO DMA, blocking until done.
- *  @param[in] dst Destination address.
- *  @param[in] src Source address.
- *  @param[in] len Transfer length in bytes.
+ *  @param[in] dst Destination address, word aligned.
+ *  @param[in] src Source address, word aligned.
+ *  @param[in] len Transfer length in bytes, a multiple of 4.
+ *  @return 0 on success, -1 if the arguments were refused.
  *  @req REQ-DABAO-BIO-DMA-0004 */
-void bio_dma_memcpy(void *dst, const void *src, uint32_t len)
+int bio_dma_memcpy(void *dst, const void *src, uint32_t len)
 {
     SEVS_REQUIRE_NOT_NULL(dst);
     SEVS_REQUIRE_NOT_NULL(src);
-    bio_dma_start(dst, src, len);
+    if (bio_dma_start(dst, src, len) != 0) return -1;
     bio_dma_wait();
+    return 0;
 }

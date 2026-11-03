@@ -43,6 +43,7 @@ DRESULT disk_ioctl (BYTE pdrv, BYTE cmd, void* buff);
 #define GET_SECTOR_SIZE		2
 #define GET_BLOCK_SIZE		3
 #define CTRL_TRIM			4
+#define MMC_GET_TYPE		50
 
 #define CT_MMC		0x01
 #define CT_SD1		0x02
