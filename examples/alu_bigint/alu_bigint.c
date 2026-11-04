@@ -1,19 +1,10 @@
 /*
  * alu_bigint.c: big integer and modular arithmetic on the ALU
  *
- * Runs modular add, subtract, multiply, exponentiation, inverse and gcd
- * against answers computed in Python, and prints PASS or FAIL for each
- * with the time it took:
- *
- *   1024 bit modular add, subtract and multiply
- *   1024 bit modular exponentiation, an RSA style round trip with e = 65537
- *   and the matching private exponent
- *   256 bit modular inverse, 512 bit gcd
- *   ALU division of a 1024 bit number by a 300 bit one, 512 bit add and
- *   subtract
- *
- * Divisions and reductions run on the SCE ALU at 0x4002F000; the
- * multiplications run on the CPU.
+ * Checks 1024 bit modular add, subtract, multiply and exponentiation,
+ * 256 bit inverse, 512 bit gcd and ALU divide, add and subtract against
+ * known answers, printing PASS or FAIL with the time taken. Divisions run
+ * on the SCE ALU and multiplications on the CPU.
  *
  * Wiring:
  *   PB14 --> USB serial RX

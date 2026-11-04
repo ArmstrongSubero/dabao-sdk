@@ -223,7 +223,8 @@ class BaochipRig:
     REVIEWED_CGU_WRITES = {
         (0x40040014, 0x070001FF),   # bio_init fast mode divider
         (0x40040014, 0x0700017F),   # bio_init slow mode divider
-        (0x4004002C, 0x00000032),   # bio_init CGU set
+        (0x4004002C, 0x00000032),   # bio_init and PKE CGU set
+        (0x40040034, 0x0000000F),   # PKE clock divider
         (0x40040080, 0x000055AA),   # bao_software_reset
     }
     REVIEWED_BLOCKS = (
@@ -251,6 +252,27 @@ class BaochipRig:
                 return
             self._fatal("RRC touched: %s 0x%08X at %s" % (kind.upper(), addr, self._where()))
         if 0x40040000 <= addr < 0x40041000:
+            # PKE driver: read CGUSEC and write it back with bit 12 (PKE
+            # clock skipping) cleared
+            if addr == 0x40040000 and size == 4 and (
+                    access != UC_MEM_WRITE or not (value & 0x1000)):
+                self._warn(("cgusec", kind), "reviewed CGUSEC %s at %s" % (kind, self._where()))
+                return
+            # pke_clock_init, pke_set_clock_divider and pke_clock_status
+            if access == UC_MEM_WRITE and (
+                    addr == 0x40040034 or
+                    (addr == 0x40040010 and value in (0, 1)) or
+                    (addr == 0x40040090 and value == 0x32) or
+                    addr == 0x40040098 or
+                    (addr == 0x400400A8 and (value & 0x7F00) == 0x2300)):
+                self._warn(("pkeclk", addr, value), "reviewed PKE clock write 0x%08X <= 0x%08X at %s" % (
+                    addr, value, self._where()))
+                return
+            if access != UC_MEM_WRITE and addr in (0x40040010, 0x40040034, 0x40040040,
+                                                   0x4004004C, 0x40040050, 0x40040098,
+                                                   0x400400A0, 0x400400A8):
+                self._warn(("cguread", addr), "reviewed CGU read 0x%08X at %s" % (addr, self._where()))
+                return
             if access == UC_MEM_WRITE and (addr, value) in self.REVIEWED_CGU_WRITES:
                 self._warn(("cgu", addr, value),
                            "reviewed CGU write 0x%08X <= 0x%08X at %s" % (addr, value, self._where()))

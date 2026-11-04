@@ -6,7 +6,7 @@
  *
  * Ported from the CrossBar Daric SDK drivers/Src/sce/alu.c and the
  * division wrapper in middleware/crossbar/crypto/ll_api.c (Copyright
- * 2024-2026 CrossBar, Inc., Apache 2.0), with bounded waits, argument
+ * 2024 to 2026 CrossBar, Inc., Apache 2.0), with bounded waits, argument
  * checks and status returns added.
  *
  * Division, addition and subtraction take numbers least significant word

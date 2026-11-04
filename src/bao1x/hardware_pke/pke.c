@@ -6,7 +6,7 @@
  * modular arithmetic on an arbitrary modulus.
  *
  * Ported from the CrossBar Daric SDK drivers/Src/sce/pke_rsa.c and the
- * sequencing in middleware/crossbar/crypto/ll_api.c (Copyright 2024-2026
+ * sequencing in middleware/crossbar/crypto/ll_api.c (Copyright 2024 to 2026
  * CrossBar, Inc., Apache 2.0).
  */
 
@@ -83,10 +83,118 @@ static int wait_ramclr(void)
  * among them) are lost. SCEMODE goes back to normal, which is what the
  * AES and SHA drivers already write.
  */
+/* PKE clock: PLL1 to VCO / 12 (about 174 MHz), PLL0 unchanged, PKE divider
+ * 0xFF. boot1 leaves PLL1 at the raw VCO, where the PKE fails. */
+#define CGU_SEC      (*(volatile uint32_t *)(0x40040000u + 0x00u))
+#define CGU_SEL0     (*(volatile uint32_t *)(0x40040000u + 0x10u))
+#define CGU_SET      (*(volatile uint32_t *)(0x40040000u + 0x2Cu))
+#define CGU_FDPKE    (*(volatile uint32_t *)(0x40040000u + 0x34u))
+#define CGU_FSFREQ0  (*(volatile uint32_t *)(0x40040000u + 0x40u))
+#define CGU_FSFREQ3  (*(volatile uint32_t *)(0x40040000u + 0x4Cu))
+#define CGU_FSVLD    (*(volatile uint32_t *)(0x40040000u + 0x50u))
+#define CGU_ARIPFLOW (*(volatile uint32_t *)(0x40040000u + 0x90u))
+#define CGU_LPEN     (*(volatile uint32_t *)(0x40040000u + 0x98u))
+#define CGU_PLLMN    (*(volatile uint32_t *)(0x40040000u + 0xA0u))
+#define CGU_PLLQ     (*(volatile uint32_t *)(0x40040000u + 0xA8u))
+#define PLL1_Q       0x2300u     /* PLL1 q0 = 4, q1 = 3 */
+#define PKE_FD       0xFFu
+
+static bool s_pke_clock_set;
+
+static void spin(uint32_t n)
+{
+    for (volatile uint32_t i = 0; i < n; i++) {
+    }
+}
+
+static void pll1_setup(void)
+{
+    uint32_t q = CGU_PLLQ;
+    uint32_t nq = (q & 0xFFu) | PLL1_Q;
+    if (q == nq)
+        return;
+
+    delay_ms(5);
+    uint32_t mstatus;
+    __asm__ volatile ("csrrci %0, mstatus, 8" : "=r"(mstatus));
+
+    CGU_SEL0 = 0;
+    CGU_SET  = 0x32u;
+    memory_fence();
+    spin(1000);
+
+    CGU_LPEN |= 0x2u;
+    CGU_ARIPFLOW = 0x32u;
+    memory_fence();
+    spin(4096);
+
+    CGU_PLLQ = nq;
+    CGU_ARIPFLOW = 0x32u;
+    memory_fence();
+
+    CGU_LPEN &= ~0x2u;
+    CGU_ARIPFLOW = 0x32u;
+    memory_fence();
+    spin(200000);
+
+    CGU_SEL0 = 1;
+    CGU_SET  = 0x32u;
+    memory_fence();
+    spin(1000);
+
+    __asm__ volatile ("csrs mstatus, %0" :: "r"(mstatus & 8u));
+}
+
+void pke_set_clock_divider(uint32_t fd)
+{
+    CGU_SEC = CGU_SEC & ~(1u << 12);
+    memory_fence();
+    CGU_FDPKE = fd & 0xFFu;
+    memory_fence();
+    CGU_SET = 0x32u;
+    memory_fence();
+    s_pke_clock_set = true;
+}
+
+void pke_clock_init(void)
+{
+    pll1_setup();
+    pke_set_clock_divider(PKE_FD);
+}
+
+void pke_clock_status(pke_clock_status_t *s)
+{
+    if (s == NULL)
+        return;
+    s->pllmn    = CGU_PLLMN;
+    s->pllq     = CGU_PLLQ;
+    s->cgusec   = CGU_SEC;
+    s->cgusel0  = CGU_SEL0;
+    s->fdpke    = CGU_FDPKE;
+    s->fsvld    = CGU_FSVLD;
+    uint32_t f0 = CGU_FSFREQ0;
+    uint32_t f3 = CGU_FSFREQ3;
+    s->fclk_mhz = f0 >> 16;
+    s->pke_mhz  = f0 & 0xFFFFu;
+    s->pll0_mhz = f3 >> 16;
+    s->pll1_mhz = f3 & 0xFFFFu;
+}
+
+static void pke_clock_setup(void)
+{
+    if (!s_pke_clock_set)
+        pke_clock_init();
+}
+
 int pke_sce_prepare(uint32_t extra_clocks)
 {
-    uint32_t clk  = SCE_SUBCLKEN | SCE_CLK_SDMA | SCE_CLK_PKE | extra_clocks;
+    (void)extra_clocks;
+    /* The Daric SDK's SUBEN bit order does not match the RTL, so turn every
+     * SCE block clock on. */
+    uint32_t clk  = 0x1Fu;
     uint32_t fifo = SCE_FIFOEN;
+
+    pke_clock_setup();
 
     SCE_SCEMODE  = 0;
     SCE_SUBCLKEN = clk;

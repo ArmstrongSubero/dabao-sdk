@@ -6,7 +6,7 @@
  *
  * Ported from the CrossBar Daric SDK drivers/Src/sce/alu.c and the
  * bndivision_le() wrapper in middleware/crossbar/crypto/ll_api.c
- * (Copyright 2024-2026 CrossBar, Inc., Apache 2.0).
+ * (Copyright 2024 to 2026 CrossBar, Inc., Apache 2.0).
  */
 
 #include "bao/platform.h"

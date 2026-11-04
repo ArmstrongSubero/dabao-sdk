@@ -5,7 +5,7 @@
  * PKE (public key engine) driver for the Baochip-1x SCE.
  *
  * Ported from the CrossBar Daric SDK (drivers/Src/sce/pke_rsa.c and
- * pke_curve.c, Copyright 2024-2026 CrossBar, Inc., Apache 2.0). The
+ * pke_curve.c, Copyright 2024 to 2026 CrossBar, Inc., Apache 2.0). The
  * register sequences are the vendor's; what changed for the Baochip is
  * that every wait is bounded, every argument is checked and every call
  * returns a status instead of asserting.
@@ -16,11 +16,11 @@
  * Every call starts by resetting the SCE control state and clearing the
  * SCE RAM, as the vendor library does before each PKE operation. That
  * also clears the AES key, so call aes_set_key() again after any PKE call.
- * The clocks and FIFO enables that were on before the call are restored.
+ * Every SCE block clock is left on and the FIFO enables are restored.
  *
- * Status: passes in the software model, but on Dabao silicon every PKE
- * operation stalls and returns PKE_ERR_TIMEOUT. For modular arithmetic
- * that works on the chip, use the alu_mod_ functions in hardware/alu.h.
+ * The first call sets up the PKE clock (see pke_clock_init below). boot1
+ * leaves the PKE on the raw 2 GHz PLL1 output, where it stalls or gives
+ * wrong answers.
  */
 
 #ifndef _HARDWARE_PKE_H
@@ -114,6 +114,29 @@ int pke_ed25519_point_mul_base(const uint8_t k[32], pke_ed_point_t *out);
 int pke_ed25519_point_add(const pke_ed_point_t *a, const pke_ed_point_t *b,
                           pke_ed_point_t *out);
 int pke_ed25519_point_double(const pke_ed_point_t *p, pke_ed_point_t *out);
+
+/* PKE clock. pke_clock_init sets PLL1 to VCO / 12 (about 174 MHz) with
+ * PLL0 and the CPU clock unchanged, clears PKE clock skipping and sets the
+ * PKE divider to 0xFF. The first PKE call runs it if nothing has yet.
+ * pke_set_clock_divider changes only the divider; the PKE clock is PLL1
+ * times (fd + 1) / 256. pke_clock_status reads the PLL settings and the CGU
+ * frequency sensors (values in MHz). All of it resets on power up. */
+typedef struct {
+    uint32_t pllmn;
+    uint32_t pllq;
+    uint32_t cgusec;
+    uint32_t cgusel0;
+    uint32_t fdpke;
+    uint32_t fsvld;
+    uint32_t fclk_mhz;
+    uint32_t pke_mhz;
+    uint32_t pll0_mhz;
+    uint32_t pll1_mhz;
+} pke_clock_status_t;
+
+void pke_clock_init(void);
+void pke_set_clock_divider(uint32_t fd);
+void pke_clock_status(pke_clock_status_t *s);
 
 /* Shared with alu.c */
 int  pke_sce_prepare(uint32_t extra_clocks);

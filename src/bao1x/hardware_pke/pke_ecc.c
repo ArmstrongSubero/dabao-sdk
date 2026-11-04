@@ -7,7 +7,7 @@
  *
  * Ported from the CrossBar Daric SDK drivers/Src/sce/pke_curve.c and
  * sdma.c, with the call sequencing of middleware/crossbar/crypto/ll_api.c
- * (Copyright 2024-2026 CrossBar, Inc., Apache 2.0). The curve constant
+ * (Copyright 2024 to 2026 CrossBar, Inc., Apache 2.0). The curve constant
  * tables are the vendor's, unchanged.
  */
 
