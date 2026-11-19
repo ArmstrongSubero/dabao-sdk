@@ -1,0 +1,31 @@
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[project]
+name = "dabao-sdk-tools"
+version = "0.1.0"
+description = "Command line tools for the Dabao SDK (Baochip-1x): UF2 signing, serial flashing and forbidden address auditing"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12"
+dependencies = [
+    "pyserial",
+    "pure25519",
+]
+
+[project.urls]
+Homepage = "https://github.com/ArmstrongSubero/dabao-sdk"
+
+[project.scripts]
+dabao-audit-addresses = "audit_addresses:main"
+dabao-serial-flash = "serial_flash:main"
+dabao-sign-and-uf2 = "sign_and_uf2:main"
+
+[tool.pdm.build]
+package-dir = "tools"
+includes = [
+    "tools/audit_addresses.py",
+    "tools/serial_flash.py",
+    "tools/sign_and_uf2.py",
+]
