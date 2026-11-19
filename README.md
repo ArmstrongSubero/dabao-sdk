@@ -12,17 +12,25 @@ The design goal for the SDK is to be simple but powerful. Register definition he
 
 **Windows:**
 
-```
+```bash
 bao_flash build blink
 bao_flash flash COM9 blink
 ```
 
 **Linux/macOS:**
 
-```
+```bash
 chmod +x bao_flash.sh
 ./bao_flash.sh build blink
 ./bao_flash.sh flash /dev/ttyACM0 blink
+```
+
+**uvx Windows/Linux/macOS**
+
+Required [uv](https://docs.astral.sh/uv/).
+
+```bash
+uvx --from git+https://github.com/ArmstrongSubero/dabao-sdk dabao-serial-flash <PORT> <uf2_file>
 ```
 
 ## Requirements
