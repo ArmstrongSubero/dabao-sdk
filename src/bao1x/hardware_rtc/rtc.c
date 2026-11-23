@@ -11,24 +11,19 @@
 #include "sevs_runtime.h"
 
 /*
- * The 32 kHz RC oscillator is not precise. The CLK1HZ_FD divider
- * value of 32499 was determined by calibration on Dabao hardware.
- * Your board may need slight adjustment.
- */
-/*
+ * The RTC counts rising edges of clk1hz, which ao_sysctrl.sv makes by
+ * toggling a register every CLK1HZ_FD + 1 cycles of clk32k, so the tick
+ * rate is clk32k / (2 * (CLK1HZ_FD + 1)). The Dabao has no 32 kHz crystal,
+ * and its internal RC oscillator measured about 23,970 Hz on the board
+ * (749 ticks/s at FD 15, 1198 at FD 9, 5994 at FD 1). It varies per chip
+ * and drifts with temperature, so a fixed divider cannot give an accurate
+ * 1 Hz tick.
+ *
  * CLK1HZ_FD is a 14-bit field. Writes above 0x3FFF are truncated:
  * writing 32499 lands as 16115.
  *
- * The RTC tick rate is F_raw / (CLK1HZ_FD + 1), where F_raw is the
- * internal RC oscillator after its fixed divide-by-32. Measured on
- * Dabao hardware at roughly 11,985 Hz, so the oscillator runs near
- * 384 kHz, not the nominal 32 kHz. It varies per chip and drifts
- * with temperature, so a fixed divider cannot give an accurate
- * 1 Hz tick.
- *
- * CLK1HZ_FD = 0 is a special case and does NOT mean divide by one.
- * It measures about 0.7x the rate the formula predicts, so do not
- * use it as a reference point when calibrating.
+ * CLK1HZ_FD = 0 measures about 0.7x the rate the formula predicts, so do
+ * not use it as a reference point when calibrating.
  */
 #define RTC_FD_MASK          0x3FFFu
 
@@ -45,13 +40,12 @@ void rtc_set_divider(uint32_t div)
 }
 
 
-/** @brief Initialize the RTC.
+/** @brief Initialize the RTC by stopping it.
  *
  *  Leaves the boot divider in place, so the RTC will not tick at 1 Hz.
- *  The 32 kHz source is an RC oscillator that runs near 384 kHz on the
- *  Dabao and varies per chip, so an accurate tick requires measuring the
- *  raw rate on your own board and writing the result to AON_CLK1HZ_FD
- *  with rtc_set_divider(). See the note at the top of this file.
+ *  An accurate tick requires measuring the oscillator on your own board
+ *  and setting the divider with rtc_set_divider(). See the note at the
+ *  top of this file.
  *  @req REQ-DABAO-RTC-0002 */
 void rtc_init(void)
 {
@@ -94,3 +88,39 @@ uint32_t rtc_get_time(void)
 {
     return RTC_DR;
 }
+
+/** @brief Set the match value for the alarm.
+ *  @param[in] seconds Counter value at which the alarm flag sets.
+ *  @req REQ-DABAO-RTC-0006 */
+void rtc_set_alarm(uint32_t seconds)
+{
+    RTC_MR = seconds;
+    RTC_ICR = 1;
+    memory_fence();
+}
+
+/** @brief Check the alarm flag.
+ *  @return True once the counter has reached the match value.
+ *  @req REQ-DABAO-RTC-0006 */
+bool rtc_alarm_fired(void)
+{
+    return (RTC_RIS & 1u) != 0;
+}
+
+/** @brief Clear the alarm flag.
+ *  @req REQ-DABAO-RTC-0006 */
+void rtc_clear_alarm(void)
+{
+    RTC_ICR = 1;
+    memory_fence();
+}
+
+/** @brief Route the alarm to the RTC interrupt line.
+ *  @param[in] enable true sets the interrupt mask bit, false clears it.
+ *  @req REQ-DABAO-RTC-0007 */
+void rtc_alarm_wake(bool enable)
+{
+    RTC_IMSC = enable ? 1u : 0u;
+    memory_fence();
+}
+

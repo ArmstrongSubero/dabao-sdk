@@ -51,12 +51,12 @@ static irq_handler_t irq_handlers[IRQ_TABLE_SIZE];
 
 static inline uint32_t csr_read_mim(void) {
     uint32_t val;
-    __asm__ volatile ("csrr %0, 0xBC0" : "=r"(val));
+    __asm__ volatile ("csrr %0, " BAO_CSR_XIM : "=r"(val));
     return val;
 }
 
 static inline void csr_write_mim(uint32_t val) {
-    __asm__ volatile ("csrw 0xBC0, %0" :: "r"(val));
+    __asm__ volatile ("csrw " BAO_CSR_XIM ", %0" :: "r"(val));
 }
 
 /*
@@ -65,16 +65,16 @@ static inline void csr_write_mim(uint32_t val) {
  * the update. Do not replace these with read-modify-write.
  */
 static inline void csr_set_mim(uint32_t mask) {
-    __asm__ volatile ("csrrs zero, 0xBC0, %0" :: "r"(mask));
+    __asm__ volatile ("csrrs zero, " BAO_CSR_XIM ", %0" :: "r"(mask));
 }
 
 static inline void csr_clear_mim(uint32_t mask) {
-    __asm__ volatile ("csrrc zero, 0xBC0, %0" :: "r"(mask));
+    __asm__ volatile ("csrrc zero, " BAO_CSR_XIM ", %0" :: "r"(mask));
 }
 
 static inline uint32_t csr_read_mip_vex(void) {
     uint32_t val;
-    __asm__ volatile ("csrr %0, 0xFC0" : "=r"(val));
+    __asm__ volatile ("csrr %0, " BAO_CSR_XIP : "=r"(val));
     return val;
 }
 
@@ -92,10 +92,10 @@ void irq_init(void)
     csr_write_mim(0);
 
     /* Enable machine external interrupts (mie.MEIE, bit 11) */
-    __asm__ volatile ("csrs mie, %0" :: "r"(1 << 11));
+    __asm__ volatile ("csrs " BAO_CSR_IE ", %0" :: "r"(1 << BAO_EXT_IE_BIT));
 
     /* Enable global interrupts (mstatus.MIE, bit 3) */
-    __asm__ volatile ("csrsi mstatus, 0x8");
+    __asm__ volatile ("csrsi " BAO_CSR_STATUS ", " BAO_STATUS_IE_IMM);
 }
 
 /** @brief Register a callback for an IRQ source.
@@ -168,9 +168,9 @@ void trap_dispatch(void)
 {
 
     uint32_t mcause;
-    __asm__ volatile ("csrr %0, mcause" : "=r"(mcause));
+    __asm__ volatile ("csrr %0, " BAO_CSR_CAUSE : "=r"(mcause));
 
-    if (mcause == 0x8000000B) {
+    if (mcause == BAO_CAUSE_EXT_IRQ) {
         /* Machine external interrupt */
         uint32_t pending = csr_read_mip_vex();
 
@@ -214,7 +214,7 @@ void trap_dispatch(void)
         }
 
         /* Re-enable machine external interrupts */
-        __asm__ volatile ("csrs mie, %0" :: "r"(1 << 11));
+        __asm__ volatile ("csrs " BAO_CSR_IE ", %0" :: "r"(1 << BAO_EXT_IE_BIT));
 
     } else {
         /* Exception: light PB1 and halt */

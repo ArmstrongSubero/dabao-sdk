@@ -77,7 +77,7 @@ void bio_dma_init(void)
      * security region or any peripheral register, whatever addresses it
      * is handed.
      */
-    bio_allow_range(0, 0x61000000u, 0x200000u);
+    bio_allow_range(0, BIO_DMA_SRAM_BASE, BIO_DMA_SRAM_SIZE);
     bio_allow_range(1, 0x50000000u, 0x40000u);
     bio_allow_range(2, 0x60060000u, 0x603DA000u - 0x60060000u);
     memory_fence();

@@ -155,13 +155,13 @@ void pwm_set_duty(uint slice, uint channel, uint16_t duty)
         duty = slice_period[slice];
 
     /*
-     * SET_CLR sets the output at counter 0 and clears it at the compare
-     * match. The two ends of the range collide with that: a compare of
-     * 0 puts the set and the clear on the same tick, and a compare at
-     * the top used to coincide with the wrap. Both were seen to glitch
-     * on hardware (the breathing example flashed at the ends). The ends
-     * are therefore produced as constant levels: 0% clears at counter 0
-     * and never sets, 100% sets at counter 0 and never clears.
+     * In sawtooth mode CLR_SET clears the output at the compare match and
+     * sets it at the end of the period, so a compare of duty - 1 keeps the
+     * output high for exactly duty ticks of the period. SET_CLR, used
+     * before, sets at the match and clears at the end, which gave the
+     * inverse duty (25% asked, 75% out) and the flash at the ends of a
+     * fade. 0% and 100% are constant levels: 0% clears at counter 0 and
+     * never sets, 100% sets at counter 0 and never clears.
      */
     uint32_t val;
     if (duty == 0) {
@@ -169,7 +169,7 @@ void pwm_set_duty(uint slice, uint channel, uint16_t duty)
     } else if (duty >= slice_period[slice]) {
         val = PWM_TH_MODE_SET | 0;
     } else {
-        val = PWM_TH_MODE_SET_CLR | (duty & 0xFFFF);
+        val = PWM_TH_MODE_CLR_SET | ((duty - 1u) & 0xFFFF);
     }
 
     uint offset = PWM_TH_CH0_OFFSET + channel * 4;

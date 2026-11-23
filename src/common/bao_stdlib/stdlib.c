@@ -85,9 +85,10 @@ void bao_init(void)
 
     /*
      * boot0/boot1 have already configured:
-     *   - PLL to 350 MHz (aclk)
+     *   - PLL at about 696 MHz, aclk (CPU) and fclk (BIO) at half of it
      *   - SRAM bank 0 write wait state
-     *   - All clock gates open
+     *   - Clock gates: SCE, BIO, USB device and mesh on, MDMA, mailbox
+     *     and QFC off (bao1x-hal clocks.rs)
      *   - UART2 at 1 Mbaud
      *
      * We just reconfigure UART2 for 115200 and set up the tick timer.
@@ -106,7 +107,7 @@ void bao_init(void)
 __attribute__((weak)) void trap_dispatch(void)
 {
     uint32_t mcause;
-    __asm__ volatile ("csrr %0, mcause" : "=r"(mcause));
+    __asm__ volatile ("csrr %0, " BAO_CSR_CAUSE : "=r"(mcause));
 
     /* Bit 31 set = interrupt, clear = exception */
     if (!(mcause & 0x80000000)) {

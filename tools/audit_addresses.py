@@ -22,10 +22,47 @@ ranges, however they are used:
   0x603DA000 to 0x603FFFFF   one way counters, access control, key slots
 
 It also refuses the SDK register macro names for those blocks (RRC_CR,
-RRC_BASE, CGU_*, PMU_*, AON_*, RTC_*, WDT_*, AT0_*, AT1_*, ATIMER_BASE,
-ATIMER_AO_BASE), the same list Rovari Studio checks. Comments are ignored.
-The driver level API (wdt_start, rtc_init) is not flagged; what is flagged
-is an application reaching the registers itself.
+RRC_BASE, CGU_*, PMU_*, AON_*, RTC_*, WDT_*, ATIMER_BASE, ATIMER_AO_BASE),
+the same list Rovari Studio checks. Comments are ignored.
+
+One exception is made, for the ATimer. Its two instances are the PULP
+apb_timer_unit (sysctrl/rtl/apbsys_intf.sv and aoperi.sv), nothing in the
+boot chain or Xous uses them, and they have been run on the board. Allowed are the ten register addresses of each instance,
+0x40043000 to 0x40043024 and 0x40063000 to 0x40063024 in steps of 4, and
+the fixed register macros AT0_*, AT1_*, AT0_AO_* and AT1_AO_* from
+hardware/regs/timer.h. ATIMER_BASE and ATIMER_AO_BASE stay refused, so an
+application can only name a register, never build an offset from the base.
+Any other address in those 4 KB pages, the watchdogs at 0x40041000 and
+0x40062000 and the EVC at 0x40044000 included, is still refused.
+
+A second exception sits inside the last range. The first two data slots,
+64 bytes at 0x603E0000 to 0x603E003F, hold the chip's public SERIAL_NUMBER
+and UUID. bunnie's bao1x-api declares both open to every boot stage, and
+reading them is how a program tells one board from another. A plain pointer
+cannot write RRAM, and rram_write_page refuses this region, so naming these
+two slots is allowed. Every other slot, the access control table and the
+counters stay refused.
+
+The watchdog and RTC drivers are approved to reach their blocks, and only
+through the driver API (wdt_start, wdt_feed, wdt_get_count, rtc_init,
+rtc_start, rtc_stop, rtc_set_time, rtc_get_time, rtc_set_divider,
+rtc_set_alarm, rtc_alarm_fired, rtc_clear_alarm, rtc_alarm_wake). The
+watchdog is ARM's CMSDK APB watchdog (sysctrl/rtl/apbsys_intf.sv, clocked
+from pclk in soc_top.sv); the driver uses 0x40041000 to 0x40041014 and the
+lock register at 0x40041C00, and its reset output only drives the reset
+generator. The RTC driver uses 0x40061000 to 0x4006101C and, through
+rtc_set_divider, the 14 bit 1 Hz divider CLK1HZ_FD at 0x40060004
+(ao/rtl/ao_sysctrl.sv). None of these can change boot0, boot1 or the RRAM.
+The power driver is approved the same way, through power_down only. It
+writes the PMU wake mask (0x40060008), the power down regulator settings
+PMUCRPD (0x40060018) and the power down key PDAR (0x40060044) in
+ao/rtl/ao_sysctrl.sv, and through rtc_alarm_wake the RTC interrupt mask
+(0x40061010). Power down holds the SoC in reset until an unmasked wake
+source rises or the RESET pin is pressed, then the chip boots again; it
+never writes the RRAM, and the 32 kHz clock select and the reset mask
+are left alone.
+An application calling those functions is not flagged; an application
+naming the registers or the WDT_*, RTC_* or AON_* macros itself still is.
 
 Run it on application code, not on the SDK. The SDK drivers reach some of
 these blocks on purpose and are reviewed separately.
@@ -43,7 +80,13 @@ REGIONS = (
 )
 
 NAMES = ("RRC_BASE", "RRC_CR", "ATIMER_BASE", "ATIMER_AO_BASE")
-NAME_PREFIXES = ("CGU_", "PMU_", "AON_", "RTC_", "WDT_", "AT0_", "AT1_")
+NAME_PREFIXES = ("CGU_", "PMU_", "AON_", "RTC_", "WDT_")
+
+ATIMER_REGS = frozenset(base + off
+                        for base in (0x40043000, 0x40063000)
+                        for off in range(0x00, 0x28, 4))
+
+PUBLIC_SLOTS = (0x603E0000, 0x603E0040)
 
 EXTENSIONS = (".c", ".h", ".cpp", ".hpp", ".cc", ".rova", ".S", ".s", ".inc")
 
@@ -81,6 +124,10 @@ def _strip_comments(text):
 
 
 def _region(value):
+    if value in ATIMER_REGS:
+        return None
+    if PUBLIC_SLOTS[0] <= value < PUBLIC_SLOTS[1]:
+        return None
     for lo, hi, name in REGIONS:
         if lo <= value < hi:
             return name

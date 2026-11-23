@@ -88,7 +88,7 @@ static sevs_crash_record_t sevs_crash_record
 SEVS_WEAK void sevs_target_disable_irq(void)
 {
     /* RISC-V: clear mstatus.MIE. Every SEVS target is RISC-V. */
-    __asm__ volatile ("csrci mstatus, 0x8" ::: "memory");
+    __asm__ volatile ("csrci " BAO_CSR_STATUS ", " BAO_STATUS_IE_IMM ::: "memory");
 }
 
 /* Studio does not compile sevs_hooks_bao1x.c, so the Baochip default
@@ -189,7 +189,7 @@ void sevs_assert_fail(sevs_fail_kind_t kind,
      * otherwise one failed check leaves the whole program running with
      * interrupts masked (timers, UART RX and the tick all stop). */
     uint32_t saved_mstatus;
-    __asm__ volatile ("csrr %0, mstatus" : "=r"(saved_mstatus) :: "memory");
+    __asm__ volatile ("csrr %0, " BAO_CSR_STATUS : "=r"(saved_mstatus) :: "memory");
     sevs_target_disable_irq();
 
     /* Nested failure: the record from the first one is the useful one.
@@ -259,8 +259,8 @@ void sevs_assert_fail(sevs_fail_kind_t kind,
     /* Step 4: action by kind. CHECK is recoverable; others halt. */
     if (kind == SEVS_FAIL_CHECK) {
         sevs_in_handler = 0U;
-        if ((saved_mstatus & 0x8U) != 0U) {
-            __asm__ volatile ("csrsi mstatus, 0x8" ::: "memory");
+        if ((saved_mstatus & BAO_STATUS_IE) != 0U) {
+            __asm__ volatile ("csrsi " BAO_CSR_STATUS ", " BAO_STATUS_IE_IMM ::: "memory");
         }
         return;
     }

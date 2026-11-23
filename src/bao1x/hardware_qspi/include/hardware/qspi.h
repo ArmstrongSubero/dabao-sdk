@@ -48,10 +48,14 @@ extern "C" {
  * For instance 1 (Dabao QSPI port), configures PC7-PC12 as AF1.
  * PC13 (CS1) is left as the bootloader configured it.
  *
- * clkdiv: SPI clock = perclk / (2 * (clkdiv + 1))
- *   clkdiv=4  -> ~10 MHz
- *   clkdiv=9  -> ~5 MHz
- *   clkdiv=49 -> ~1 MHz
+ * clkdiv: SPI clock = perclk / (2 * clkdiv), and clkdiv=0 bypasses the
+ * divider so the SPI clock is perclk itself (udma_clkgen.sv). With
+ * perclk at 99.8 MHz:
+ *   clkdiv=5  -> 9.98 MHz
+ *   clkdiv=10 -> 4.99 MHz
+ *   clkdiv=50 -> 998 kHz
+ * For a device with a maximum clock F, use clkdiv = perclk / (2 * F),
+ * rounded up.
  */
 void qspi_init(uint instance, uint8_t clkdiv);
 

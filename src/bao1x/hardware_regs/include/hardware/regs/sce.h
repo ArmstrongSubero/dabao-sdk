@@ -72,9 +72,22 @@
 #define HASH_LKEY_BUF       ((volatile uint32_t *)(SCE_BASE + 0x0000))
 #define HASH_MSG_BUF        ((volatile uint32_t *)(SCE_BASE + 0x0400))
 #define HASH_OUT_BUF        ((volatile uint32_t *)(SCE_BASE + 0x0600))
+#define HASH_KEY_BUF        ((volatile uint32_t *)(SCE_BASE + 0x0100))
+/* segment pointers 0 to 7: LKEY, KEY, SKEY, SCRT, MSG, HOUT, SOB and the
+ * write pointer every write back uses (combohasha.sv 223, 740) */
+#define HASH_SEGPTR(n)      REG32(SCE_HASH_BASE + 0x20 + 4u * (n))
+/* OPT2 bits (combohasha.sv 218) */
+#define HASH_OPT2_IFSTART   (1u << 2)   /* first block starts from the H words */
 
 /* Hash function codes */
 #define HASH_FUNC_SHA256    0x00
+#define HASH_FUNC_SHA512    0x01
+#define HASH_FUNC_HMAC256_KEYHASH 0x40
+#define HASH_FUNC_HMAC512_KEYHASH 0x41
+#define HASH_FUNC_HMAC256_PASS1   0x50
+#define HASH_FUNC_HMAC512_PASS1   0x51
+#define HASH_FUNC_HMAC256_PASS2   0x60
+#define HASH_FUNC_HMAC512_PASS2   0x61
 #define HASH_FUNC_INIT      0xFF
 
 /* TRNG registers */

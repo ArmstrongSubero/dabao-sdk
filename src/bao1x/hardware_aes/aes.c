@@ -95,25 +95,30 @@ int aes_set_key(const uint8_t *key, uint32_t key_len)
     return 0;
 }
 
-/** @brief ECB encrypt or decrypt a data block.  */
+/** @brief Encrypt or decrypt data in one of the block cipher modes. */
 #define AES_SEG_BYTES 256u
 
-static int s_aes_ecb_crypt(const uint8_t *in, uint8_t *out, uint32_t len, uint8_t func)
+/* OPT3 (optltx) bit 5: the CTR increment acts on counter word 3, the last
+ * four bytes of the counter block (aes.sv crtopt1). */
+#define AES_OPT3_CTR_WORD3 (1u << 5)
+
+static int s_aes_crypt(const uint8_t *in, uint8_t *out, uint32_t len, uint8_t func, uint32_t mode)
 {
     SEVS_ASSERT(AES_POLL_TIMEOUT > 0);
-    if (len % 16 != 0 || len == 0) {
+    if (len % 16 != 0 || len == 0 || mode > AES_MODE_CFB) {
         return -1;
     }
 
     /* The SCE input and output segments are 256 bytes each, so longer
-     * buffers go through in 256 byte pieces. ECB blocks are independent. */
+     * buffers go through in 256 byte pieces. The engine keeps the chaining
+     * value in the IV words between pieces. */
     while (len > 0) {
         uint32_t chunk = (len > AES_SEG_BYTES) ? AES_SEG_BYTES : len;
 
-        AES_OPT3 = 0;
+        AES_OPT3 = (mode == AES_MODE_CTR) ? AES_OPT3_CTR_WORD3 : 0;
         s_aes_load_bytes(in, AES_IN_BUF, chunk);
 
-        AES_OPT1 = s_key_mode;
+        AES_OPT1 = s_key_mode | (mode << 4);
         AES_OPT2 = (chunk / 16) - 1;
         AES_CRFUNC = func;
 
@@ -130,6 +135,36 @@ static int s_aes_ecb_crypt(const uint8_t *in, uint8_t *out, uint32_t len, uint8_
     return 0;
 }
 
+/** @brief Set the IV or initial counter block.
+ *  @param[in] iv Pointer to 16 bytes.
+ *  @return 0. */
+int aes_set_iv(const uint8_t *iv)
+{
+    SEVS_REQUIRE_NOT_NULL(iv);
+    /* The IV pointer (segptr 0) is left at word 0 of the key segment */
+    s_aes_load_bytes(iv, AES_KEY_BUF, 16);
+    memory_fence();
+    return 0;
+}
+
+/** @brief Encrypt data in a block cipher mode.
+ *  @return 0 on success, -1 on invalid length or mode. */
+int aes_encrypt_mode(uint32_t mode, const uint8_t *in, uint8_t *out, uint32_t len)
+{
+    SEVS_REQUIRE_NOT_NULL(in);
+    SEVS_REQUIRE_NOT_NULL(out);
+    return s_aes_crypt(in, out, len, AES_FUNC_ENC, mode);
+}
+
+/** @brief Decrypt data in a block cipher mode.
+ *  @return 0 on success, -1 on invalid length or mode. */
+int aes_decrypt_mode(uint32_t mode, const uint8_t *in, uint8_t *out, uint32_t len)
+{
+    SEVS_REQUIRE_NOT_NULL(in);
+    SEVS_REQUIRE_NOT_NULL(out);
+    return s_aes_crypt(in, out, len, AES_FUNC_DEC, mode);
+}
+
 /** @brief Encrypt data using AES-ECB.
  *  @param[in]  in  Pointer to plaintext (must be 16-byte aligned length).
  *  @param[out] out Pointer to ciphertext output buffer.
@@ -140,7 +175,7 @@ int aes_encrypt(const uint8_t *in, uint8_t *out, uint32_t len)
 {
     SEVS_REQUIRE_NOT_NULL(in);
     SEVS_REQUIRE_NOT_NULL(out);
-    return s_aes_ecb_crypt(in, out, len, AES_FUNC_ENC);
+    return s_aes_crypt(in, out, len, AES_FUNC_ENC, AES_MODE_ECB);
 }
 
 /** @brief Decrypt data using AES-ECB.
@@ -153,5 +188,5 @@ int aes_decrypt(const uint8_t *in, uint8_t *out, uint32_t len)
 {
     SEVS_REQUIRE_NOT_NULL(in);
     SEVS_REQUIRE_NOT_NULL(out);
-    return s_aes_ecb_crypt(in, out, len, AES_FUNC_DEC);
+    return s_aes_crypt(in, out, len, AES_FUNC_DEC, AES_MODE_ECB);
 }

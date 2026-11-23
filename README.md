@@ -2,7 +2,7 @@
 
 The Dabao SDK provides the headers, libraries and build system necessary to write programs for the Baochip-1x RISC-V SoC in C. It targets the Dabao evaluation board, a Pico-form-factor dev board for the Baochip-1x.
 
-The SDK provides a Pico-style API and programming environment that is familiar to embedded C developers. A single program runs on the device at a time and starts with a conventional `main()` method. C-level libraries are provided for accessing all of the Baochip-1x's hardware including GPIO, UART, SPI, I2C, PWM, ADC, timers, the BIO coprocessor (analogous to PIO), hardware cryptography (AES, SHA-256, TRNG), and on-chip ReRAM non-volatile storage.
+The SDK provides a Pico-style API and programming environment that is familiar to embedded C developers. A single program runs on the device at a time and starts with a conventional `main()` method. C-level libraries are provided for accessing all of the Baochip-1x's hardware including GPIO, UART, SPI, I2C, PWM, ADC, timers, the BIO coprocessor (analogous to PIO), hardware cryptography (AES, SHA-256, SHA-512, HMAC, TRNG, the PKE and ALU big number engines, ECDSA and Ed25519 signatures), power down, USB serial and on-chip ReRAM non-volatile storage.
 
 All peripheral drivers use the UDMA DMA engine for data transfers, with both blocking and non-blocking (async) APIs available for UART, SPI, and I2C. The BIO coprocessor provides a quad-core 700 MHz programmable I/O subsystem that can be used for custom protocols, high-speed bit-banging, or memory-to-memory DMA.
 
@@ -66,6 +66,8 @@ bao_flash build <example>
 ```
 
 Output goes to `build/<example>.uf2`.
+
+The build script pulls in FatFS for any example that includes `ff.h` or `diskio.h`, and TinyUSB for `usb_cdc`, so neither needs any extra setup.
 
 ## Flashing
 
@@ -134,6 +136,8 @@ the boot1 REPL, so you can reflash without touching buttons. Use
 `--persistent` if you want the firmware to run automatically on every reset
 and power cycle instead.
 
+Both boot1 entry points are supported. Older boot1 builds jump to 0x60060000 and boot1 builds from bunnie's change of 15 August 2026 jump to 0x60060400, and the linker script and startup code place a jump at 0x60060300 and `_start` at 0x60060400 so either one starts the program the same way.
+
 
 ## Drivers
 
@@ -142,21 +146,27 @@ and power cycle instead.
 | GPIO    | `hardware/gpio.h`    | Digital I/O with pull-ups, Schmitt trigger, bank ops              |
 | UART    | `hardware/uart.h`    | UDMA UART with blocking and async DMA (4 instances)               |
 | SPI     | `hardware/spi.h`     | UDMA SPI master with blocking and async full-duplex (4 instances) |
-| I2C     | `hardware/i2c.h`     | UDMA I2C master with blocking and async (4 instances)             |
-| PWM     | `hardware/pwm.h`     | 4 slices, 4 channels each, frequency and duty control             |
+| I2C     | `hardware/i2c.h`     | UDMA I2C master with blocking and async, up to 4096 bytes per transfer (4 instances) |
+| PWM     | `hardware/pwm.h`     | 4 slices, 4 channels each, frequency and duty control (0 to 100%) |
 | ADC     | `hardware/adc.h`     | 10-bit ADC with bandgap reference and temp sensor                 |
 | Timer   | `hardware/timer.h`   | Timer0 (periodic/one-shot), TickTimer, ATimer, D11CTIME           |
 | IRQ     | `hardware/irq.h`     | Per-array interrupt dispatch with callback registration           |
 | BIO     | `hardware/bio.h`     | Quad-core PicoRV32 I/O coprocessor at 700 MHz                     |
 | BIO DMA | `hardware/bio_dma.h` | Memory-to-memory DMA via BIO Core 3                               |
 | RRAM    | `hardware/rram.h`    | 2.5 MB on-chip non-volatile storage with unaligned writes         |
-| AES     | `hardware/aes.h`     | Hardware AES-128/192/256 encryption (SCE)                         |
-| SHA     | `hardware/sha.h`     | Hardware SHA-256 hashing (SCE)                                    |
+| AES     | `hardware/aes.h`     | Hardware AES-128/192/256 in ECB, CBC, CTR, OFB and CFB (SCE)      |
+| SHA     | `hardware/sha.h`     | Hardware SHA-256 and SHA-512, streaming, HMAC-SHA256/512 (SCE)    |
 | TRNG    | `hardware/trng.h`    | Hardware true random number generator (SCE)                       |
+| PKE     | `hardware/pke.h`     | Public key engine: modular arithmetic, RSA and curve operations (SCE) |
+| ALU     | `hardware/alu.h`     | Big number divide, add, subtract and modular arithmetic (SCE)     |
+| Sign    | `hardware/sign.h`    | ECDSA on P-256, secp256k1 and P-384 (RFC 6979) and Ed25519 (RFC 8032) |
 | WDT     | `hardware/wdt.h`     | Watchdog timer with lock/unlock                                   |
-| RTC     | `hardware/rtc.h`     | Real-time clock on always-on domain                               |
+| RTC     | `hardware/rtc.h`     | Real-time clock on always-on domain, with alarm and wake          |
+| Power   | `hardware/power.h`   | Power down until a wake source (RTC alarm) boots the chip again   |
 | QSPI    | `hardware/qspi.h`    | General-purpose quad-SPI via UDMA SPIM (SPIM1 on Dabao)           |
 | W25Q    | `hardware/w25q.h`    | W25Q-series external NOR flash (read, write, erase, quad mode)    |
+
+The signature module runs on top of the PKE, ALU and SHA drivers. Every PKE call clears the SCE RAM, which also clears the AES key, so call `aes_set_key()` again after any PKE or signature call.
 
 ## Examples
 
@@ -166,6 +176,7 @@ and power cycle instead.
 | `button`           | GPIO       | Read push button on PB3 with pull-up                        |
 | `hello_uart`       | UART       | Print messages over UART2                                   |
 | `hello_uart_async` | UART       | Non-blocking UART transmit with LED work during DMA         |
+| `usb_cdc`          | USB        | The Dabao's USB port as a serial port that echoes what is typed |
 | `pwm`              | PWM        | LED breathing on PB1 via PWM slice 1                        |
 | `spi_mcp41010`     | SPI        | Sweep a digital potentiometer over SPI2                     |
 | `spi_async`        | SPI        | Non-blocking full-duplex SPI with loopback verification     |
@@ -183,11 +194,48 @@ and power cycle instead.
 | `aes`              | AES        | NIST test vector encrypt/decrypt round-trip                 |
 | `sha`              | SHA        | SHA-256 hash verification against known vectors             |
 | `trng`             | TRNG       | Generate hardware random numbers                            |
+| `alu_bigint`       | ALU        | 1024 bit modular arithmetic, inverse, gcd and divide against known answers |
+| `pke_bigint`       | PKE, ALU   | The same big integer checks run on the PKE and ALU          |
+| `pke_ecc`          | PKE        | P-256, secp256k1, P-384, X25519 and Ed25519 point operations |
+| `pke_clock`        | PKE        | Prints the PLL and frequency sensors, checks the PKE at two clock speeds |
+| `pke_diag`         | PKE        | Runs single PKE operations and prints the SCE status registers |
+| `signed_update`    | Sign, RRAM | Checks an Ed25519 signature on an image before storing it in one of two RRAM slots |
 | `wdt`              | WDT        | Watchdog timer with feed and reset                          |
 | `rtc`              | RTC        | Real-time clock counting seconds                            |
 | `fatfs`            | SPI, FatFS | SD card mount, directory listing, file read/write           |
 | `pmu`              | PMU        | Power management register dump                              |
 | `w25q_flash`       | QSPI, W25Q | External NOR flash: ID, erase, write, read, quad mode       |
+
+### MMU sandbox examples
+
+Each of these folders holds a `bao_mmu` file, so they always build with the sandbox described below.
+
+| Example     | Description                                                              |
+| ----------- | ------------------------------------------------------------------------ |
+| `mmu_svc`   | SHA, TRNG and Timer0 interrupts used from supervisor mode through the SDK |
+| `mmu_gap`   | A store into the unmapped SRAM gap, which ends in the fault report        |
+| `mmu_stack` | A runaway recursion that reaches the guard page under the main stack      |
+
+### Emulator tests (baoemu)
+
+These programs were written against baoemu, the Baochip-1x emulator, and check the SDK and the BIO against the RTL and published test vectors, printing PASS or FAIL for each check.
+
+| Example      | Description                                                          |
+| ------------ | -------------------------------------------------------------------- |
+| `aes_modes`  | Every AES mode and key size against the NIST SP 800-38A vectors       |
+| `sha_stream` | Streaming SHA-256 and SHA-512 against the FIPS 180-2 vectors          |
+| `hmac`       | HMAC-SHA256 and HMAC-SHA512 against RFC 4231 test cases 1 to 7        |
+| `ecdsa`      | ECDSA on P-256, P-384 and secp256k1 against the RFC 6979 vectors      |
+| `ed25519`    | Ed25519 against the RFC 8032 section 7.1 vectors                      |
+| `bio_start`  | A started core runs nothing before pc 0 of its new program            |
+| `bio_isa`    | 32 bit and compressed instructions checked against host arithmetic    |
+| `bio_fifo`   | FIFO depth, empty and full behaviour, level events and x30 waits      |
+| `bio_div`    | Quantum divider periods, fractional dividers and lock step starts     |
+| `bio_gpio`   | GPIO mask, event registers, clock count and trap                      |
+| `bio_irq`    | BIO interrupts to the CPU and DMA request routing                     |
+| `bio_ext`    | Core 1 clocked by core 0 on BIO pin 2                                 |
+| `bio_snap`   | Snap to quantum on input and output                                   |
+| `bio_filter` | DMA filter windows and the gutter for refused accesses                |
 
 ## Writing Your Own Program
 
@@ -212,6 +260,24 @@ int main(void)
 ```
 
 Then: `bao_flash build your_program`
+
+## MMU Sandbox (BAO_MMU, opt in)
+
+`BAO_MMU=1 ./bao_flash.sh build your_program`, or a file named `bao_mmu` in the example's folder, builds the program to run in supervisor mode under an identity mapped Sv32 page table. Without it nothing changes: the build commands, and the binaries they make, are what they always were.
+
+On Windows, `set BAO_MMU=1` before `bao_flash build` or `bao_flash run` does the same, and `set BAO_MMU=` goes back to normal builds.
+
+In a sandbox build a stray store from your code cannot reach the boot chain. The page table maps only the program image (read and execute), runtime storage (read only), your stacks and data, the IFRAM DMA buffers and the peripheral pages the SDK drivers use. boot0, boot1, the one way counters, the security region, the IFR and every register block from 0x40000000 to 0x4007FFFF (RRC, SCE, CGU, WDT, ATIMER, EVC, AON, RTC) are unmapped, so touching them ends in a page fault. The main stack has an unmapped guard page below it, so a runaway recursion ends in a fault as well. A fault prints the cause, the faulting address and the pc on the console and halts:
+
+```
+MMU: store page fault at 0x61000fd0, pc 0x60065912, supervisor mode
+MMU: below the main stack, stack overflow
+MMU: halted
+```
+
+The SHA, AES, TRNG, PKE, ALU, RRAM write, WDT and RTC drivers, bio_init's clock setting and bao_software_reset still work from your code: they run in machine mode behind an ecall, unchanged, with every pointer you pass them checked against your page table and lengths capped at 2 MB. rram_write and friends reach runtime storage only (0x60160000 up); a write into the program region faults. Interrupts and the irq, timer and event calls work as before, delivered to supervisor mode.
+
+What a sandbox build cannot do: read or write the machine mode CSRs (mstatus, mie, mcycle, the 0xBC0 and 0xFC0 arrays), reach the mailbox, the MDMA or any register block the SDK drivers do not use, use the PKE helper calls that take SCE register pointers (pke_run, pke_seg_*, pke_wait_fr, pke_sce_prepare, pke_bn_*), or use USB CDC: the sandbox build does not compile TinyUSB, so `usb_cdc` builds as a normal program only. Use `sstatus`, `sie`, the cycle CSR and the SDK calls instead. Every sandbox image carries all the machine mode drivers (about 23 KB more than a plain build), and SRAM loses its bottom 132 KB to machine mode data and stack, the page tables, the stacks and their guard pages. `src/mmu/bao_mmu.c` has the details.
 
 ## Clock Tree
 
@@ -254,6 +320,8 @@ Then: `bao_flash build your_program`
 - **BIO access filters** must be disabled before BIO cores can access SRAM/peripherals.
 - **perclk is 99 MHz**, not 100 MHz. PLL fractional divider is broken, integer-only from 48 MHz crystal.
 - **RRAM security vectors** occupy the top 152 KB (above 0x603DA000). Do not write there.
+- **The RTC has no 32 kHz crystal** on the Dabao. Its internal RC oscillator measures about 24 kHz and varies per chip, so the 1 Hz divider has to be calibrated against the TickTimer.
+- **PKE calls clear the SCE RAM**, AES key included. Set the AES key again after any PKE or signature call.
 
 ## License
 

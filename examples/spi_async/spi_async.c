@@ -20,7 +20,7 @@
 #include "hardware/spi.h"
 
 #define TEST_LEN    128
-#define SPI_CLKDIV  4    /* ~10 MHz */
+#define SPI_CLKDIV  4    /* 12.5 MHz */
 
 int main(void)
 {

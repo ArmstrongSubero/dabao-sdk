@@ -6,12 +6,17 @@
  *
  * Transmit uses UDMA DMA transfers through an IFRAM buffer.
  * Receive uses the polling path (REG_VALID / REG_DATA).
+ *
+ * The blocking transmit waits by the millisecond tick, scaled to the
+ * chunk length and the baud rate. A fixed poll count gave up before a
+ * full chunk had left the wire, and the rest of the data was dropped.
  */
 
 #include "hardware/uart.h"
 #include "hardware/gpio.h"
 #include "hardware/regs/addressmap.h"
 #include "hardware/regs/udma.h"
+#include "bao/stdlib.h"
 #include "sevs_runtime.h"
 
 /* Local constants */
@@ -20,6 +25,8 @@
 #define UART_POLL_LIMIT            1000000u
 #define UART_WRITE_CHUNK_LIMIT     100000u
 #define UART_PUTS_MAX_LEN          100000u
+#define UART_TX_MARGIN_MS          20u
+#define UART_BITS_PER_BYTE         10u
 
 #ifndef UART_OK
 #define UART_OK                    0
@@ -86,6 +93,56 @@ static uint32_t detect_perclk(void)
     }
 
     return 99000000UL;   /* perclk is 99 MHz on the Baochip-1x */
+}
+
+/*
+ * Time allowed for a transmit of the given length: twice what the bytes
+ * need on the wire at the instance's present baud rate, plus a margin.
+ * The baud rate is read back from the divider in SETUP, so it is right
+ * for a UART that boot1 set up and uart_init never touched.
+ */
+static uint32_t uart_tx_timeout_ms(uint instance, uint32_t bytes)
+{
+    uint32_t div = *uart_reg(instance, UDMA_UART_SETUP_OFFSET) >> 16;
+    uint32_t perclk = (s_perclk != 0u) ? s_perclk : detect_perclk();
+    uint32_t baud;
+    uint32_t wire_ms;
+
+    if (div == 0u) {
+        div = 1u;
+    }
+    baud = perclk / div;
+    if (baud == 0u) {
+        baud = 1u;
+    }
+
+    if (bytes > UART_TX_BUF_SIZE) {
+        bytes = UART_TX_BUF_SIZE;
+    }
+
+    wire_ms = (bytes * UART_BITS_PER_BYTE * 1000u) / baud;
+    return UART_TX_MARGIN_MS + (2u * wire_ms);
+}
+
+/*
+ * Wait until the TX DMA channel is free and the shifter is idle.
+ * Returns true when both are, false if timeout_ms passed first.
+ */
+static bool uart_tx_wait_idle(uint instance, uint32_t timeout_ms)
+{
+    volatile uint32_t *tx_cfg = uart_reg(instance, UDMA_TX_CFG_OFFSET);
+    volatile uint32_t *status = uart_reg(instance, UDMA_UART_STATUS_OFFSET);
+    uint64_t start = millis();
+
+    do {
+        if (((*tx_cfg & UDMA_CFG_EN) == 0u) &&
+            ((*status & UART_STATUS_TX_BUSY) == 0u)) {
+            return true;
+        }
+    } while ((millis() - start) < timeout_ms);
+
+    return (((*tx_cfg & UDMA_CFG_EN) == 0u) &&
+            ((*status & UART_STATUS_TX_BUSY) == 0u));
 }
 
 /**
@@ -184,11 +241,9 @@ void uart_write(uint instance, const uint8_t *data, uint32_t len)
     volatile uint32_t *tx_cfg;
     volatile uint32_t *tx_addr;
     volatile uint32_t *tx_size;
-    volatile uint32_t *status;
     uint32_t chunk;
     uint32_t i;
     uint32_t guard;
-    uint32_t poll;
 
     SEVS_ASSERT(instance < UART_INSTANCE_COUNT);
     SEVS_REQUIRE_NOT_NULL(data);
@@ -204,7 +259,6 @@ void uart_write(uint instance, const uint8_t *data, uint32_t len)
     tx_cfg = uart_reg(instance, UDMA_TX_CFG_OFFSET);
     tx_addr = uart_reg(instance, UDMA_TX_SADDR_OFFSET);
     tx_size = uart_reg(instance, UDMA_TX_SIZE_OFFSET);
-    status = uart_reg(instance, UDMA_UART_STATUS_OFFSET);
 
     for (guard = 0u;
          ((guard < UART_WRITE_CHUNK_LIMIT) && (len > 0u));
@@ -216,21 +270,9 @@ void uart_write(uint instance, const uint8_t *data, uint32_t len)
             chunk = UART_TX_BUF_SIZE;
         }
 
-        for (poll = 0u;
-             ((poll < UART_POLL_LIMIT) && ((*tx_cfg & UDMA_CFG_EN) != 0u));
-             poll++) {
-            /* bounded poll */
-        }
-
-        for (poll = 0u;
-             ((poll < UART_POLL_LIMIT) &&
-              ((*status & UART_STATUS_TX_BUSY) != 0u));
-             poll++) {
-            /* bounded poll */
-        }
-
-        if (((*tx_cfg & UDMA_CFG_EN) != 0u) ||
-            ((*status & UART_STATUS_TX_BUSY) != 0u)) {
+        /* An earlier transfer, blocking or async, may still be leaving. */
+        if (uart_tx_wait_idle(instance,
+                uart_tx_timeout_ms(instance, UART_TX_BUF_SIZE)) == false) {
             return;
         }
 
@@ -243,21 +285,8 @@ void uart_write(uint instance, const uint8_t *data, uint32_t len)
         *tx_size = chunk;
         *tx_cfg = UDMA_CFG_EN | UDMA_CFG_SIZE_8;
 
-        for (poll = 0u;
-             ((poll < UART_POLL_LIMIT) && ((*tx_cfg & UDMA_CFG_EN) != 0u));
-             poll++) {
-            /* bounded poll */
-        }
-
-        for (poll = 0u;
-             ((poll < UART_POLL_LIMIT) &&
-              ((*status & UART_STATUS_TX_BUSY) != 0u));
-             poll++) {
-            /* bounded poll */
-        }
-
-        if (((*tx_cfg & UDMA_CFG_EN) != 0u) ||
-            ((*status & UART_STATUS_TX_BUSY) != 0u)) {
+        if (uart_tx_wait_idle(instance,
+                uart_tx_timeout_ms(instance, chunk)) == false) {
             return;
         }
 

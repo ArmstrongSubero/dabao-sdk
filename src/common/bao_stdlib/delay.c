@@ -58,9 +58,9 @@ static uint64_t read_cycles(void)
     uint32_t hi_b;
 
     do {
-        __asm__ volatile ("csrr %0, mcycleh" : "=r"(hi_a));
-        __asm__ volatile ("csrr %0, mcycle"  : "=r"(lo));
-        __asm__ volatile ("csrr %0, mcycleh" : "=r"(hi_b));
+        __asm__ volatile ("csrr %0, " BAO_CSR_CYCLEH : "=r"(hi_a));
+        __asm__ volatile ("csrr %0, " BAO_CSR_CYCLE  : "=r"(lo));
+        __asm__ volatile ("csrr %0, " BAO_CSR_CYCLEH : "=r"(hi_b));
     } while (hi_a != hi_b);
 
     return ((uint64_t)hi_b << 32) | (uint64_t)lo;
@@ -70,8 +70,8 @@ static uint64_t read_cycles(void)
 static uint32_t s_cycles_per_us = 0;
 
 /* Fallback if the measurement looks wrong: the counter runs at the CPU
- * clock, which boot1 leaves at FCLK on the Dabao. */
-#define CYCLES_PER_US_DEFAULT  (FCLK_HZ / 1000000UL)
+ * clock, which is aclk. */
+#define CYCLES_PER_US_DEFAULT  (ACLK_HZ / 1000000UL)
 #define CYCLES_PER_US_MIN      10UL
 #define CYCLES_PER_US_MAX      2000UL
 #define CALIBRATE_TICKS        4U

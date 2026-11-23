@@ -29,6 +29,12 @@
 #define FRAME_WORDS 36
 #define FRAME_BYTES (FRAME_WORDS * 4)
 
+    .section .text.entry, "ax"
+    .global _entry
+    .type _entry, @function
+_entry:
+    j       _start
+
     .section .text.start
     .global _start
     .type _start, @function

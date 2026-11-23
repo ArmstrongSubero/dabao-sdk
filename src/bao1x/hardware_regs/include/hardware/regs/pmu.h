@@ -19,7 +19,10 @@
 #define CGU_SEL1            REG32(CGU_BASE + 0x30)
 
 /* PMU registers (in the AON domain) */
+#define PMU_WKUPMASK        REG32(AON_BASE + 0x08)
 #define PMU_CR              REG32(AON_BASE + 0x10)
+#define PMU_CRPD            REG32(AON_BASE + 0x18)
+#define PMU_PDAR            REG32(AON_BASE + 0x44)
 #define PMU_SR              REG32(AON_BASE + 0x38)
 
 /* RTC registers */
@@ -28,6 +31,7 @@
 #define RTC_LR              REG32(RTC_BASE + 0x08)
 #define RTC_CR              REG32(RTC_BASE + 0x0C)
 #define RTC_IMSC            REG32(RTC_BASE + 0x10)
+#define RTC_RIS             REG32(RTC_BASE + 0x14)
 #define RTC_ICR             REG32(RTC_BASE + 0x1C)
 
 /* AON clock registers */

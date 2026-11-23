@@ -5,7 +5,8 @@
  * sensor, printing the raw values and computed voltages.
  *
  * Wiring:
- *   PC9 (header pin 7 area) --> voltage source (0 to 3.3V)
+ *   PC9 (header pin 6) --> voltage to measure, 1.208 V full scale and
+ *   0.3 to 1.0 V for the documented accuracy; use a divider above that
  *   PB14 --> USB-serial RX
  */
 

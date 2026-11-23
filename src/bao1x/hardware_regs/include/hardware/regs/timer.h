@@ -47,6 +47,19 @@
 #define AT1_START           REG32(ATIMER_BASE + 0x1C)
 #define AT1_RESET           REG32(ATIMER_BASE + 0x24)
 
+/* Always on ATimer, same register layout at ATIMER_AO_BASE */
+#define AT0_AO_CFG          REG32(ATIMER_AO_BASE + 0x00)
+#define AT0_AO_CNT          REG32(ATIMER_AO_BASE + 0x08)
+#define AT0_AO_CMP          REG32(ATIMER_AO_BASE + 0x10)
+#define AT0_AO_START        REG32(ATIMER_AO_BASE + 0x18)
+#define AT0_AO_RESET        REG32(ATIMER_AO_BASE + 0x20)
+
+#define AT1_AO_CFG          REG32(ATIMER_AO_BASE + 0x04)
+#define AT1_AO_CNT          REG32(ATIMER_AO_BASE + 0x0C)
+#define AT1_AO_CMP          REG32(ATIMER_AO_BASE + 0x14)
+#define AT1_AO_START        REG32(ATIMER_AO_BASE + 0x1C)
+#define AT1_AO_RESET        REG32(ATIMER_AO_BASE + 0x24)
+
 /* ATimer config bits */
 #define AT_CFG_EN           (1 << 0)
 #define AT_CFG_RST          (1 << 1)

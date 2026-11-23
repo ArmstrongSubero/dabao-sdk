@@ -3,6 +3,8 @@
 #
 # Usage:
 #   ./bao_flash.sh build <example>                         Build only
+#   BAO_MMU=1 ./bao_flash.sh build <example>               Build with the MMU sandbox
+#                                                          (also when examples/<example>/bao_mmu exists)
 #   ./bao_flash.sh flash <port> <example>                  Flash (normal, bootwait on)
 #   ./bao_flash.sh flash <port> <example> --persistent     Flash + auto-run on reset
 #   ./bao_flash.sh flash <port> <example> --icsp <dtr>     Zero-button via DTR reset
@@ -106,6 +108,7 @@ INC="$INC -Isrc/bao1x/hardware_adc/include"
 INC="$INC -Isrc/bao1x/hardware_trng/include"
 INC="$INC -Isrc/bao1x/hardware_wdt/include"
 INC="$INC -Isrc/bao1x/hardware_rtc/include"
+INC="$INC -Isrc/bao1x/hardware_power/include"
 INC="$INC -Isrc/bao1x/hardware_bio/include"
 INC="$INC -Isrc/bao1x/hardware_timer/include"
 INC="$INC -Isrc/bao1x/hardware_bio_dma/include"
@@ -115,6 +118,7 @@ INC="$INC -Isrc/bao1x/hardware_aes/include"
 INC="$INC -Isrc/bao1x/hardware_sha/include"
 INC="$INC -Isrc/bao1x/hardware_pke/include"
 INC="$INC -Isrc/bao1x/hardware_alu/include"
+INC="$INC -Isrc/bao1x/hardware_sign/include"
 INC="$INC -Isrc/bao1x/hardware_qspi/include"
 INC="$INC -Isrc/bao1x/hardware_w25q/include"
 INC="$INC -Isrc/bao1x/hardware_reset/include"
@@ -133,15 +137,19 @@ SDK_SRCS="
     src/bao1x/hardware_trng/trng.c
     src/bao1x/hardware_wdt/wdt.c
     src/bao1x/hardware_rtc/rtc.c
+    src/bao1x/hardware_power/power.c
     src/bao1x/hardware_bio/bio.c
     src/bao1x/hardware_bio_dma/bio_dma.c
     src/bao1x/hardware_irq/irq.c
     src/bao1x/hardware_rram/rram.c
     src/bao1x/hardware_aes/aes.c
     src/bao1x/hardware_sha/sha.c
+    src/bao1x/hardware_sha/sha_stream.c
     src/bao1x/hardware_pke/pke.c
     src/bao1x/hardware_pke/pke_ecc.c
     src/bao1x/hardware_alu/alu.c
+    src/bao1x/hardware_sign/ecdsa.c
+    src/bao1x/hardware_sign/ed25519.c
     src/bao1x/hardware_qspi/qspi.c
     src/bao1x/hardware_w25q/w25q.c
     src/common/bao_stdlib/stdio.c
@@ -219,6 +227,11 @@ do_build() {
         exit 1
     fi
 
+    if [ "${BAO_MMU:-}" = "1" ] || [ -f "$EXAMPLE_DIR/bao_mmu" ]; then
+        do_build_mmu "$EXAMPLE"
+        return
+    fi
+
     echo ""
     echo "============================================"
     echo "  Building: $EXAMPLE"
@@ -257,10 +270,30 @@ do_build() {
         exit 1
     fi
 
+    if [ "$EXAMPLE" = "usb_cdc" ]; then
+        INC="$INC -I$EXAMPLE_DIR -Ithird_party/tinyusb/src -Ithird_party/tinyusb/src/portable/corigine/udc"
+    fi
+
     ${CROSS}gcc $ARCH $CFLAGS $INC -c -o build/main.o "$MAIN_SRC"
 
     # Third-party libraries
-    if [ "$EXAMPLE" = "fatfs" ]; then
+    if [ "$EXAMPLE" = "usb_cdc" ]; then
+        echo "       Compiling TinyUSB ..."
+        TUSB_SRCS="
+            third_party/tinyusb/src/tusb.c
+            third_party/tinyusb/src/common/tusb_fifo.c
+            third_party/tinyusb/src/device/usbd.c
+            third_party/tinyusb/src/device/usbd_control.c
+            third_party/tinyusb/src/class/cdc/cdc_device.c
+            third_party/tinyusb/src/portable/corigine/udc/dcd_corigine_udc.c
+        "
+        for f in $TUSB_SRCS; do
+            obj="build/tusb_$(basename "${f%.c}").o"
+            ${CROSS}gcc $ARCH $CFLAGS $INC -c -o "$obj" "$f" || exit 1
+            EXTRA_OBJS="$EXTRA_OBJS $obj"
+        done
+    fi
+    if [ "$EXAMPLE" = "fatfs" ] || grep -q -e '"ff.h"' -e '"diskio.h"' "$MAIN_SRC"; then
         echo "       Compiling FatFS ..."
         ${CROSS}gcc $ARCH $CFLAGS $INC -Ithird_party/fatfs -c -o build/ff.o third_party/fatfs/ff.c
         ${CROSS}gcc $ARCH $CFLAGS $INC -Ithird_party/fatfs -c -o build/diskio.o third_party/fatfs/diskio.c
@@ -285,6 +318,123 @@ do_build() {
     echo ""
     echo "============================================"
     echo "  BUILD SUCCESS: build/${EXAMPLE}.uf2"
+    echo "============================================"
+    echo ""
+}
+
+# ---- BAO_MMU sandbox build ----
+# BAO_MMU=1 in the environment, or a file named bao_mmu in the example's
+# folder, selects it. main runs in supervisor mode under an identity mapped
+# Sv32 page table (src/mmu/bao_mmu.c). The drivers that reach the SCE, the
+# RRAM controller, the CGU, the WDT or the RTC are compiled as machine mode
+# objects (msvc_*.o) with their functions renamed by bao_mmu_mside.h, and
+# supervisor code reaches them through the ecall stubs in bao_mmu_stubs.S.
+# Without BAO_MMU nothing here runs and do_build is unchanged.
+
+MMU_MSIDE_SRCS="
+    src/bao1x/hardware_sha/sha.c
+    src/bao1x/hardware_sha/sha_stream.c
+    src/bao1x/hardware_aes/aes.c
+    src/bao1x/hardware_trng/trng.c
+    src/bao1x/hardware_pke/pke.c
+    src/bao1x/hardware_pke/pke_ecc.c
+    src/bao1x/hardware_alu/alu.c
+    src/bao1x/hardware_sign/ecdsa.c
+    src/bao1x/hardware_sign/ed25519.c
+    src/bao1x/hardware_rram/rram.c
+    src/bao1x/hardware_wdt/wdt.c
+    src/bao1x/hardware_rtc/rtc.c
+    src/bao1x/hardware_power/power.c
+    src/mmu/bao_mmu.c
+"
+
+do_build_mmu() {
+    local EXAMPLE="$1"
+    local EXAMPLE_DIR="examples/$EXAMPLE"
+    local MAIN_SRC=""
+    local EXTRA_OBJS=""
+    local SDK_OBJS=""
+    local MCFLAGS="$CFLAGS -DBAO_MMU=1"
+    local MINC="$INC -Isrc/mmu"
+    local f
+    local obj
+    local side
+
+    echo ""
+    echo "============================================"
+    echo "  Building: $EXAMPLE (BAO_MMU sandbox)"
+    echo "============================================"
+    echo ""
+
+    mkdir -p build
+
+    echo "[0/4] Checking $EXAMPLE for forbidden addresses ..."
+    python3 tools/audit_addresses.py "$EXAMPLE_DIR" || exit 1
+
+    echo "[1/4] Assembling startup and service stubs ..."
+    ${CROSS}gcc $ARCH -g -DBAO_MMU=1 -c -o build/mmu_crt0.o src/runtime/crt0_mmu.S
+    ${CROSS}gcc $ARCH -g -DBAO_MMU=1 -Isrc/mmu -c -o build/mmu_stubs.o src/mmu/bao_mmu_stubs.S
+
+    echo "[2/4] Compiling SDK (machine mode drivers as msvc_*.o) ..."
+    for f in $SDK_SRCS src/mmu/bao_mmu.c; do
+        side="mmu_s"
+        case "$MMU_MSIDE_SRCS" in
+            *"$f"*) side="msvc" ;;
+        esac
+        obj="${f%.c}.o"
+        obj="build/${side}_${obj//\//_}"
+
+        if [ "$side" = "msvc" ]; then
+            ${CROSS}gcc $ARCH $MCFLAGS $MINC -include src/mmu/bao_mmu_mside.h -c -o "$obj" "$f"
+        else
+            ${CROSS}gcc $ARCH $MCFLAGS $MINC -c -o "$obj" "$f"
+        fi
+
+        SDK_OBJS="$SDK_OBJS $obj"
+    done
+
+    echo "[3/4] Compiling $EXAMPLE ..."
+
+    for f in "$EXAMPLE_DIR"/*.c; do
+        if [ -f "$f" ]; then
+            MAIN_SRC="$f"
+            break
+        fi
+    done
+
+    if [ -z "$MAIN_SRC" ]; then
+        echo "Error: no .c file found in $EXAMPLE_DIR"
+        exit 1
+    fi
+
+    ${CROSS}gcc $ARCH $MCFLAGS $MINC -c -o build/mmu_main.o "$MAIN_SRC"
+
+    if [ "$EXAMPLE" = "fatfs" ] || grep -q -e '"ff.h"' -e '"diskio.h"' "$MAIN_SRC"; then
+        echo "       Compiling FatFS ..."
+        ${CROSS}gcc $ARCH $MCFLAGS $MINC -Ithird_party/fatfs -c -o build/mmu_ff.o third_party/fatfs/ff.c
+        ${CROSS}gcc $ARCH $MCFLAGS $MINC -Ithird_party/fatfs -c -o build/mmu_diskio.o third_party/fatfs/diskio.c
+        EXTRA_OBJS="build/mmu_ff.o build/mmu_diskio.o"
+    fi
+
+    echo "[4/4] Linking $EXAMPLE.uf2 ..."
+    ${CROSS}gcc $ARCH -T bao1x_mmu.ld -nostdlib -nostartfiles -Wl,--gc-sections \
+        -o "build/${EXAMPLE}.elf" \
+        build/mmu_crt0.o \
+        build/mmu_stubs.o \
+        $SDK_OBJS \
+        build/mmu_main.o \
+        $EXTRA_OBJS \
+        -lgcc
+
+    ${CROSS}objcopy -O binary "build/${EXAMPLE}.elf" "build/${EXAMPLE}.bin"
+
+    python3 tools/sign_and_uf2.py "build/${EXAMPLE}.bin" "build/${EXAMPLE}.uf2" 0x60060000 0xa7d76373
+
+    echo ""
+    ${CROSS}size "build/${EXAMPLE}.elf"
+    echo ""
+    echo "============================================"
+    echo "  BUILD SUCCESS: build/${EXAMPLE}.uf2 (BAO_MMU sandbox)"
     echo "============================================"
     echo ""
 }

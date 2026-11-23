@@ -35,7 +35,7 @@ static void mcp41010_set_wiper(uint8_t value)
 
     cs_low();
     delay_us(10);
-    spi_write_blocking(2, pkt, 2, 49);  /* ~1 MHz */
+    spi_write_blocking(2, pkt, 2, 49);  /* 1.02 MHz */
     delay_us(10);
     cs_high();
     delay_us(10);

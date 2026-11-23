@@ -8,6 +8,7 @@
 #include "hardware/i2c.h"
 #include "hardware/gpio.h"
 #include "hardware/uart.h"
+#include "bao/stdlib.h"
 #include "hardware/regs/addressmap.h"
 #include "hardware/regs/udma.h"
 #include "sevs_runtime.h"
@@ -40,38 +41,71 @@ static const uint32_t i2c_cg[] = {
  * The Dabao board exposes I2C0 only, so this is not a limitation there.
  */
 static uint32_t i2c_divider;
+static uint32_t i2c_speed_hz = 100000;
 
 static inline volatile uint32_t *i2c_reg(uint inst, uint offset)
 {
     return (volatile uint32_t *)(i2c_base[inst] + offset);
 }
 
-#define I2C_POLL_LIMIT 1000000
+/*
+ * Transfer timeout.
+ *
+ * A fixed poll count cannot cover every transfer: 4096 bytes at 100 kHz
+ * is on the bus for about 370 ms, far longer than a short register read.
+ * The wait is therefore timed against the millisecond tick. Each byte is
+ * nine bit times, and the allowance is twice the time the payload needs
+ * plus a fixed margin for the address phases and the stop.
+ */
+#define I2C_TIMEOUT_MARGIN_MS  20u
+
+static uint32_t i2c_timeout_ms(uint32_t bytes)
+{
+    uint32_t bit_ms = ((bytes + 4u) * 9u * 1000u) / i2c_speed_hz;
+    return I2C_TIMEOUT_MARGIN_MS + 2u * bit_ms;
+}
 
 /*
- * NACK detection.
+ * NACK and end of transaction detection.
  *
  * A NACK does not stall the DMA channels. The RD_NACK command still
  * clocks out eight bits, reads 0xFF off the pulled-up bus, and every
  * channel goes idle normally, so a timeout cannot detect it. The
  * status lives in IRQ array 12 instead.
  *
- * The Daric datasheet gives I2C0.nack as IRQn 184 and I2C0.err as 188.
- * Measured on real hardware: a failed read sets bit 8 of this array's
- * EV_PENDING, and every transaction sets bit 12 (end of transfer).
- * Bit 8 is therefore I2C0's NACK flag, and instances 1 to 3 are
- * assumed to follow at bits 9, 10 and 11. Only instance 0 has been
- * verified on hardware.
+ * The command channel going idle does not mean the bus is finished
+ * either. The commands pass through a two entry FIFO and a four entry
+ * clock crossing FIFO (udma_i2c_top.sv), so a short list such as
+ * START, address, STOP is swallowed whole before START reaches the
+ * pins. The end of a transaction is taken from the bus itself: the
+ * controller raises its err event when it sees the bus go busy
+ * (udma_i2c_control.sv, err_o = busy rise or arbitration lost), and
+ * bit 0 of STATUS stays set until the STOP condition.
+ *
+ * udma_sub.sv places the four nack events at bits 8 to 11 of this
+ * array and the four err events at bits 12 to 15. Measured on real
+ * hardware for I2C0: a failed read sets bit 8, and every transaction
+ * sets bit 12.
  */
 #define I2C_IRQ_ARRAY_BASE   0xE0008000UL
 #define I2C_IRQ_EV_PENDING   (*(volatile uint32_t *)(I2C_IRQ_ARRAY_BASE + 0x10))
 #define I2C_IRQ_EV_ENABLE    (*(volatile uint32_t *)(I2C_IRQ_ARRAY_BASE + 0x14))
 #define I2C_NACK_BIT(inst)   (1u << (8 + (inst)))
+#define I2C_BUSY_RISE_BIT(inst) (1u << (12 + (inst)))
+#define I2C_STATUS_BUSY      (1u << 0)
 
-/* Clear this instance's NACK flag before starting a transaction. */
+static bool i2c_async_active[4];
+
+/* Clear this instance's NACK flag. */
 static inline void i2c_nack_clear(uint inst)
 {
     I2C_IRQ_EV_PENDING = I2C_NACK_BIT(inst);
+}
+
+/* Clear the NACK and bus busy flags just before a transaction starts. */
+static inline void i2c_flags_clear(uint inst)
+{
+    I2C_IRQ_EV_PENDING = I2C_NACK_BIT(inst) | I2C_BUSY_RISE_BIT(inst);
 }
 
 /* True if the slave failed to acknowledge during the last transaction. */
@@ -82,16 +116,67 @@ static inline bool i2c_nack_seen(uint inst)
 
 /*
  * Wait for a DMA channel to go idle. Returns true on success, false if
- * the channel was still busy after I2C_POLL_LIMIT iterations. A stuck
- * channel usually means the bus is held low or the slave NACKed.
+ * the channel was still busy after timeout_ms. A stuck channel usually
+ * means the bus is held low or the slave is stretching the clock.
  */
-static bool i2c_wait_idle(uint inst, uint offset)
+static bool i2c_wait_idle_for(uint inst, uint offset, uint32_t timeout_ms)
 {
-    for (int s_poll = 0; s_poll < I2C_POLL_LIMIT; s_poll++) {
+    uint64_t start = millis();
+    do {
         if ((*i2c_reg(inst, offset) & UDMA_CFG_EN) == 0)
             return true;
+    } while ((millis() - start) < timeout_ms);
+    return (*i2c_reg(inst, offset) & UDMA_CFG_EN) == 0;
+}
+
+/* Wait for a channel left busy by an earlier transfer of any length. */
+static bool i2c_wait_idle(uint inst, uint offset)
+{
+    return i2c_wait_idle_for(inst, offset, i2c_timeout_ms(I2C_MAX_XFER));
+}
+
+/* True once the transaction has started on the pins and reached STOP. */
+static inline bool i2c_bus_done(uint inst)
+{
+    if ((I2C_IRQ_EV_PENDING & I2C_BUSY_RISE_BIT(inst)) == 0)
+        return false;
+    return (*i2c_reg(inst, I2C_STATUS_OFFSET) & I2C_STATUS_BUSY) == 0;
+}
+
+static bool i2c_wait_bus_done(uint inst, uint32_t timeout_ms)
+{
+    uint64_t start = millis();
+    do {
+        if (i2c_bus_done(inst))
+            return true;
+    } while ((millis() - start) < timeout_ms);
+    return i2c_bus_done(inst);
+}
+
+/* Pulse the controller's soft reset. Clears a busy flag left set by a
+ * glitch that looked like START with no STOP after it. */
+static void i2c_soft_reset(uint inst)
+{
+    *i2c_reg(inst, I2C_SETUP_OFFSET) = 0x01;
+    memory_fence();
+    for (volatile int d = 0; d < 100; d++)
+        __asm__ volatile ("nop");
+    *i2c_reg(inst, I2C_SETUP_OFFSET) = 0x00;
+    memory_fence();
+}
+
+/* Wait for a bus left busy by an earlier transfer, then arm the flags. */
+static void i2c_bus_claim(uint inst)
+{
+    uint32_t timeout_ms = i2c_timeout_ms(I2C_MAX_XFER);
+    uint64_t start = millis();
+    while (*i2c_reg(inst, I2C_STATUS_OFFSET) & I2C_STATUS_BUSY) {
+        if ((millis() - start) >= timeout_ms) {
+            i2c_soft_reset(inst);
+            break;
+        }
     }
-    return false;
+    i2c_flags_clear(inst);
 }
 
 /** @brief Initialize an I2C master instance at the specified clock speed.
@@ -107,6 +192,7 @@ void i2c_init(uint instance, uint32_t speed_hz)
 
     uint32_t perclk = uart_get_perclk();
     i2c_divider = (perclk / (5 * speed_hz)) - 1;
+    i2c_speed_hz = speed_hz;
 
     /* Open UDMA clock gate */
     REG32(UDMA_CTRL_BASE) |= i2c_cg[instance];
@@ -126,12 +212,8 @@ void i2c_init(uint instance, uint32_t speed_hz)
     I2C_IRQ_EV_ENABLE |= 0xF00u;
 
     /* Reset the I2C peripheral */
-    *i2c_reg(instance, I2C_SETUP_OFFSET) = 0x01;
-    memory_fence();
-    for (volatile int d = 0; d < 100; d++)
-        __asm__ volatile ("nop");
-    *i2c_reg(instance, I2C_SETUP_OFFSET) = 0x00;
-    memory_fence();
+    i2c_soft_reset(instance);
+    i2c_async_active[instance] = false;
 }
 
 /** @brief Write data to an I2C slave, blocking until complete.
@@ -147,7 +229,6 @@ int i2c_write_blocking(uint instance, uint8_t addr,
     SEVS_REQUIRE_NOT_NULL(data);
     if (instance > 3) return I2C_ERR_INVALID;
     if (len > I2C_MAX_XFER) return I2C_ERR_LEN;
-    i2c_nack_clear(instance);
     for (uint32_t i = 0; i < len; i++)
         i2c_tx_buf[i] = data[i];
 
@@ -166,6 +247,7 @@ int i2c_write_blocking(uint instance, uint8_t addr,
 
     if (!i2c_wait_idle(instance, UDMA_TX_CFG_OFFSET)) return I2C_ERR_TIMEOUT;
     if (!i2c_wait_idle(instance, UDMA_CMD_CFG_OFFSET)) return I2C_ERR_TIMEOUT;
+    i2c_bus_claim(instance);
 
     if (len > 0) {
         *i2c_reg(instance, UDMA_TX_SADDR_OFFSET) = (uint32_t)(uintptr_t)i2c_tx_buf;
@@ -178,9 +260,11 @@ int i2c_write_blocking(uint instance, uint8_t addr,
     *i2c_reg(instance, UDMA_CMD_CFG_OFFSET)   = UDMA_CFG_EN | UDMA_CFG_SIZE_32;
     memory_fence();
 
-    if (!i2c_wait_idle(instance, UDMA_CMD_CFG_OFFSET)) return I2C_ERR_TIMEOUT;
+    uint32_t timeout_ms = i2c_timeout_ms(len);
+    if (!i2c_wait_idle_for(instance, UDMA_CMD_CFG_OFFSET, timeout_ms)) return I2C_ERR_TIMEOUT;
     if (len > 0)
-        if (!i2c_wait_idle(instance, UDMA_TX_CFG_OFFSET)) return I2C_ERR_TIMEOUT;
+        if (!i2c_wait_idle_for(instance, UDMA_TX_CFG_OFFSET, timeout_ms)) return I2C_ERR_TIMEOUT;
+    if (!i2c_wait_bus_done(instance, timeout_ms)) return I2C_ERR_TIMEOUT;
 
     if (i2c_nack_seen(instance)) {
         i2c_nack_clear(instance);
@@ -203,7 +287,6 @@ int i2c_read_blocking(uint instance, uint8_t addr,
     if (instance > 3) return I2C_ERR_INVALID;
     if (len > I2C_MAX_XFER) return I2C_ERR_LEN;
     if (len == 0) return I2C_OK;
-    i2c_nack_clear(instance);
     for (uint32_t i = 0; i < len; i++)
         i2c_rx_buf[i] = 0;
 
@@ -222,6 +305,7 @@ int i2c_read_blocking(uint instance, uint8_t addr,
 
     if (!i2c_wait_idle(instance, UDMA_RX_CFG_OFFSET)) return I2C_ERR_TIMEOUT;
     if (!i2c_wait_idle(instance, UDMA_CMD_CFG_OFFSET)) return I2C_ERR_TIMEOUT;
+    i2c_bus_claim(instance);
 
     *i2c_reg(instance, UDMA_RX_SADDR_OFFSET) = (uint32_t)(uintptr_t)i2c_rx_buf;
     *i2c_reg(instance, UDMA_RX_SIZE_OFFSET)  = len;
@@ -232,8 +316,10 @@ int i2c_read_blocking(uint instance, uint8_t addr,
     *i2c_reg(instance, UDMA_CMD_CFG_OFFSET)   = UDMA_CFG_EN | UDMA_CFG_SIZE_32;
     memory_fence();
 
-    if (!i2c_wait_idle(instance, UDMA_CMD_CFG_OFFSET)) return I2C_ERR_TIMEOUT;
-    if (!i2c_wait_idle(instance, UDMA_RX_CFG_OFFSET)) return I2C_ERR_TIMEOUT;
+    uint32_t timeout_ms = i2c_timeout_ms(len);
+    if (!i2c_wait_idle_for(instance, UDMA_CMD_CFG_OFFSET, timeout_ms)) return I2C_ERR_TIMEOUT;
+    if (!i2c_wait_idle_for(instance, UDMA_RX_CFG_OFFSET, timeout_ms)) return I2C_ERR_TIMEOUT;
+    if (!i2c_wait_bus_done(instance, timeout_ms)) return I2C_ERR_TIMEOUT;
 
     memory_fence();
     for (uint32_t i = 0; i < len; i++)
@@ -264,7 +350,6 @@ int i2c_write_read_blocking(uint instance, uint8_t addr,
     if (instance > 3) return I2C_ERR_INVALID;
     if (src_len > I2C_MAX_XFER || dst_len > I2C_MAX_XFER) return I2C_ERR_LEN;
     if (dst_len == 0) return i2c_write_blocking(instance, addr, src, src_len);
-    i2c_nack_clear(instance);
     for (uint32_t i = 0; i < src_len; i++)
         i2c_tx_buf[i] = src[i];
     for (uint32_t i = 0; i < dst_len; i++)
@@ -295,6 +380,7 @@ int i2c_write_read_blocking(uint instance, uint8_t addr,
     if (!i2c_wait_idle(instance, UDMA_TX_CFG_OFFSET)) return I2C_ERR_TIMEOUT;
     if (!i2c_wait_idle(instance, UDMA_RX_CFG_OFFSET)) return I2C_ERR_TIMEOUT;
     if (!i2c_wait_idle(instance, UDMA_CMD_CFG_OFFSET)) return I2C_ERR_TIMEOUT;
+    i2c_bus_claim(instance);
 
     /* Enqueue RX */
     *i2c_reg(instance, UDMA_RX_SADDR_OFFSET) = (uint32_t)(uintptr_t)i2c_rx_buf;
@@ -314,10 +400,12 @@ int i2c_write_read_blocking(uint instance, uint8_t addr,
     *i2c_reg(instance, UDMA_CMD_CFG_OFFSET)   = UDMA_CFG_EN | UDMA_CFG_SIZE_32;
     memory_fence();
 
-    if (!i2c_wait_idle(instance, UDMA_CMD_CFG_OFFSET)) return I2C_ERR_TIMEOUT;
+    uint32_t timeout_ms = i2c_timeout_ms(src_len + dst_len);
+    if (!i2c_wait_idle_for(instance, UDMA_CMD_CFG_OFFSET, timeout_ms)) return I2C_ERR_TIMEOUT;
     if (src_len > 0)
-        if (!i2c_wait_idle(instance, UDMA_TX_CFG_OFFSET)) return I2C_ERR_TIMEOUT;
-    if (!i2c_wait_idle(instance, UDMA_RX_CFG_OFFSET)) return I2C_ERR_TIMEOUT;
+        if (!i2c_wait_idle_for(instance, UDMA_TX_CFG_OFFSET, timeout_ms)) return I2C_ERR_TIMEOUT;
+    if (!i2c_wait_idle_for(instance, UDMA_RX_CFG_OFFSET, timeout_ms)) return I2C_ERR_TIMEOUT;
+    if (!i2c_wait_bus_done(instance, timeout_ms)) return I2C_ERR_TIMEOUT;
 
     memory_fence();
     for (uint32_t i = 0; i < dst_len; i++)
@@ -363,7 +451,6 @@ void i2c_write_read_async(uint instance, uint8_t addr,
     }
 
     /* Read phase (if requested) */
-    i2c_nack_clear(instance);
     if (rx_len > 0) {
         i2c_cmd_buf[idx++] = I2C_CMD_START;
         i2c_cmd_buf[idx++] = I2C_CMD_WRB((addr << 1) | 0x01);
@@ -383,6 +470,8 @@ void i2c_write_read_async(uint instance, uint8_t addr,
     if (!i2c_wait_idle(instance, UDMA_TX_CFG_OFFSET)) return;
     if (!i2c_wait_idle(instance, UDMA_RX_CFG_OFFSET)) return;
     if (!i2c_wait_idle(instance, UDMA_CMD_CFG_OFFSET)) return;
+    i2c_bus_claim(instance);
+    i2c_async_active[instance] = true;
 
     /* Enqueue RX */
     if (rx_len > 0) {
@@ -407,7 +496,7 @@ void i2c_write_read_async(uint instance, uint8_t addr,
 
 /** @brief Check whether an async I2C transaction has completed.
  *  @param[in] instance I2C peripheral index (0-3).
- *  @return true if all DMA channels are idle.
+ *  @return true if all DMA channels are idle and the bus has reached STOP.
  *  @req REQ-DABAO-I2C-0006 */
 bool i2c_async_done(uint instance)
 {
@@ -417,6 +506,10 @@ bool i2c_async_done(uint instance)
     if (*i2c_reg(instance, UDMA_CMD_CFG_OFFSET) & UDMA_CFG_EN) return false;
     if (*i2c_reg(instance, UDMA_TX_CFG_OFFSET) & UDMA_CFG_EN) return false;
     if (*i2c_reg(instance, UDMA_RX_CFG_OFFSET) & UDMA_CFG_EN) return false;
+    if (i2c_async_active[instance]) {
+        if (!i2c_bus_done(instance)) return false;
+        i2c_async_active[instance] = false;
+    }
     return true;
 }
 
@@ -427,7 +520,9 @@ void i2c_async_wait(uint instance)
 {
     SEVS_ASSERT(instance <= 3);
 
-    for (int s_poll = 0; s_poll < I2C_POLL_LIMIT && !i2c_async_done(instance); s_poll++) { /* bounded poll */ }
+    uint32_t timeout_ms = i2c_timeout_ms(2u * I2C_MAX_XFER);
+    uint64_t start = millis();
+    while (!i2c_async_done(instance) && (millis() - start) < timeout_ms) { /* bounded by time */ }
 }
 
 /** @brief Copy received data from the I2C DMA buffer after an async transfer.

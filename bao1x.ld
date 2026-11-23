@@ -24,15 +24,25 @@
  * 0x60060000 are the signature block written by the signing tool, so code
  * starts at 0x60060300.
  *
+ * ENTRY
+ *
+ * Older boot1 builds jump to 0x60060000, where the JAL in the signature
+ * block sends the CPU to 0x60060300. boot1 builds from bunnie's change of
+ * 15 August 2026 ("fix the unsigned boot header vulnerability") jump to
+ * 0x60060400 instead. 0x60060300 therefore holds a single jump to _start
+ * (crt0.S, section .text.entry) and _start is placed at 0x60060400, so
+ * both kinds of boot1 start the program the same way.
+ *
  * The ceiling is the start of the runtime storage region. Above it is where
  * rram_write() puts data at run time, and the image must never overlap it.
  * Below 0x60060000 is boot0 and boot1, and a write there costs the board.
  *
  * KEEPING IMAGES SMALL STILL MATTERS
  *
- * Every 256-byte page written during a flash is one pass through the RRAM
- * controller's stage and commit sequence. A 1 MB image is roughly 4000
- * pages on every rebuild; a 64 KB image is 250. Large constant data such as
+ * The RRAM is written 32 bytes at a time, and every 32 bytes written during
+ * a flash is one pass through the RRAM controller's stage and commit
+ * sequence. A 1 MB image is roughly 32,000 of them on every rebuild; a
+ * 64 KB image is about 2,000. Large constant data such as
  * model weights, lookup tables or audio belongs in runtime storage, written
  * once with rram_write() and read back with rram_read(), rather than
  * compiled into the image and rewritten on every build.
@@ -84,7 +94,9 @@ SECTIONS
 {
     .text : ALIGN(4)
     {
-        *(.text.start)
+        KEEP(*(.text.entry))
+        . = 0x100;
+        KEEP(*(.text.start))
         *(.text .text.*)
         *(.rodata .rodata.*)
         *(.srodata .srodata.*)

@@ -28,7 +28,7 @@ int main(void)
     bao_init();
     mini_printf("\r\n=== W25Q Flash Test ===\r\n");
 
-    /* Initialize flash on SPIM1, CS0, ~5 MHz */
+    /* Initialize flash on SPIM1, CS0, 5.5 MHz */
     int rc = w25q_init(1, 0, 9);
     if (rc != 0)
     {

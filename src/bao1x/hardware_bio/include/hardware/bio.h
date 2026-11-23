@@ -354,6 +354,13 @@ static inline uint32_t bio_event_status(void)
 /*                     Inline Debug Helpers                                    */
 /* ========================================================================== */
 
+/*
+ * bio_core_pc and bio_core_trapped read a core's debug register. Every SDK
+ * stop parks the core on an ebreak at pc 0, so after bio_stop_cores,
+ * bio_stop_all, bio_load_code or bio_init a stopped core reads trapped with
+ * pc 0. To see where a program faulted, read these while the core is still
+ * running, before stopping it.
+ */
 static inline uint32_t bio_core_pc(uint32_t core)
 {
     volatile uint32_t *dbg = (volatile uint32_t *)(BIO_BDMA_BASE + 0x90 + core * 4);
@@ -389,6 +396,9 @@ static inline int bio_core_trapped(uint32_t core)
  * with halt instructions, drains FIFOs, and clears all configuration.
  * Call once at startup before using any other BIO function.
  *
+ * Every core is left trapped on an ebreak ("parked"), so that the first
+ * bio_start_cores runs nothing but the program loaded into the core.
+ *
  * @fclk_hz: The BIO core clock frequency in Hz (typically 700000000).
  *           Used for clock divider calculations.
  *
@@ -402,6 +412,11 @@ int bio_init(uint32_t fclk_hz);
  * The target core must be stopped before calling this. If core 0 is the
  * target, all cores must be stopped (core 0's IMEM port is shared with
  * the host write path).
+ *
+ * Before writing, the core is parked (left trapped, see bio_stop_cores),
+ * so a core stopped by a plain SFR_CTRL write is safe to start afterwards
+ * too. This briefly enables the core and restarts it; the FIFO with its
+ * number keeps its words.
  *
  * @core: Core number (0-3).
  * @code: Pointer to the machine code bytes.
@@ -470,7 +485,13 @@ void bio_clear_extclk(uint32_t core);
  *
  * Each bit in the mask corresponds to a core. Setting a bit enables,
  * restarts, and resets the clock divider for that core. Cores started
- * in the same call will have their dividers in lock-step.
+ * in the same call will have their dividers in lock step. A started core
+ * begins at pc 0 of its program with its FIFO (the one with its number)
+ * cleared. Every other running core is stopped, as before.
+ *
+ * Running cores are first stopped and parked (see bio_stop_cores), and
+ * the start write is followed by six pclk of APB reads, so when this
+ * returns the cores are out of reset and their FIFOs take pushes.
  *
  * @core_mask: Bitmask of cores to start (e.g., 0x3 for cores 0 and 1).
  */
@@ -479,12 +500,26 @@ void bio_start_cores(uint32_t core_mask);
 /*
  * bio_stop_cores - Stop one or more BIO cores.
  *
+ * Each stopped core is then parked: it is briefly enabled with word 0 of
+ * its IMEM set to ebreak and restarted, so it ends trapped, and its IMEM,
+ * divider, external clock setting and the words in the FIFO with its
+ * number are put back. The program it was running may run on for about
+ * one pclk (some tens of ns) before it stops, with whatever effect that
+ * has on pins, events and other FIFOs. While a core is parked its FIFO is
+ * emptied and refilled, so other running cores should not be using that
+ * FIFO at the time, and FIFO level events may pass through other levels.
+ * This usually takes a few microseconds; if the first try does not trap the core, a second one
+ * fills its whole IMEM with ebreak (about 70 us). A trapped core does
+ * nothing until the reset of the next start, so that start cannot run
+ * anything stale.
+ *
  * @core_mask: Bitmask of cores to stop.
  */
 void bio_stop_cores(uint32_t core_mask);
 
 /*
- * bio_stop_all - Stop all BIO cores immediately.
+ * bio_stop_all - Stop all BIO cores immediately, then park them as
+ * bio_stop_cores does.
  */
 void bio_stop_all(void);
 

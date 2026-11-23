@@ -9,11 +9,6 @@
  *   PB14 --> USB-serial RX (for serial output)
  */
 
-/*
- * Note: Duty cycle values of 0% and 100% may produce glitches on
- * this hardware. The breathing loop uses 1-99% to avoid this.
- */
-
 #include "bao.h"
 #include "hardware/pwm.h"
 
@@ -31,16 +26,15 @@ int main(void)
     mini_printf("PWM period: %u counts\r\n", period);
 
     while (1) {
-       
-     for (uint32_t pct = 1; pct <= 99; pct++) {
-    pwm_set_percent(1, 1, pct);
-    delay_ms(20);
-}
-delay_ms(200);
-for (int32_t pct = 99; pct >= 1; pct--) {
-    pwm_set_percent(1, 1, (uint32_t)pct);
-    delay_ms(20);
-}
-delay_ms(200);
-   }
+        for (uint32_t pct = 0; pct <= 100; pct++) {
+            pwm_set_percent(1, 1, pct);
+            delay_ms(20);
+        }
+        delay_ms(200);
+        for (int32_t pct = 100; pct >= 0; pct--) {
+            pwm_set_percent(1, 1, (uint32_t)pct);
+            delay_ms(20);
+        }
+        delay_ms(200);
+    }
 }

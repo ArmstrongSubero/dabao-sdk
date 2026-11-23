@@ -22,29 +22,31 @@
 extern "C" {
 #endif
 
-/* VexRiscv custom interrupt CSRs */
+/* VexRiscv custom interrupt CSRs. With BAO_MMU the inline helpers below
+ * use the supervisor arrays SIM and SIP and sie, sstatus and scause
+ * instead (see bao/platform.h); the names stay as they were. */
 #define CSR_MIM             0xBC0
 #define CSR_MIP_VEX         0xFC0
 
 static inline uint32_t csr_read_mim(void) {
     uint32_t val;
-    __asm__ volatile ("csrr %0, 0xBC0" : "=r"(val));
+    __asm__ volatile ("csrr %0, " BAO_CSR_XIM : "=r"(val));
     return val;
 }
 
 static inline void csr_write_mim(uint32_t val) {
-    __asm__ volatile ("csrw 0xBC0, %0" :: "r"(val));
+    __asm__ volatile ("csrw " BAO_CSR_XIM ", %0" :: "r"(val));
 }
 
 static inline uint32_t csr_read_mip_vex(void) {
     uint32_t val;
-    __asm__ volatile ("csrr %0, 0xFC0" : "=r"(val));
+    __asm__ volatile ("csrr %0, " BAO_CSR_XIP : "=r"(val));
     return val;
 }
 
 static inline uint32_t csr_read_mcause(void) {
     uint32_t val;
-    __asm__ volatile ("csrr %0, mcause" : "=r"(val));
+    __asm__ volatile ("csrr %0, " BAO_CSR_CAUSE : "=r"(val));
     return val;
 }
 
@@ -72,10 +74,10 @@ static inline void timer0_start_periodic_ms(uint32_t ms)
     csr_write_mim(csr_read_mim() | (1 << TIMER0_IRQ));
 
     /* Enable machine external interrupts (mie.MEIE, bit 11) */
-    __asm__ volatile ("csrs mie, %0" :: "r"(1 << 11));
+    __asm__ volatile ("csrs " BAO_CSR_IE ", %0" :: "r"(1 << BAO_EXT_IE_BIT));
 
     /* Enable global interrupts (mstatus.MIE, bit 3) */
-    __asm__ volatile ("csrsi mstatus, 0x8");
+    __asm__ volatile ("csrsi " BAO_CSR_STATUS ", " BAO_STATUS_IE_IMM);
 
     TIMER0_EN = 1;
 }

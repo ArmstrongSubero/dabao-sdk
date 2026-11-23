@@ -23,6 +23,17 @@
 
 #include "bao/platform.h"
 
+/* SRAM the DMA core may reach. With BAO_MMU the bottom 112 KB of SRAM
+ * holds machine mode data and the page tables (bao1x_mmu.ld), and the
+ * window starts above them. */
+#ifdef BAO_MMU
+#define BIO_DMA_SRAM_BASE   0x6101C000u
+#define BIO_DMA_SRAM_SIZE   0x1E4000u
+#else
+#define BIO_DMA_SRAM_BASE   0x61000000u
+#define BIO_DMA_SRAM_SIZE   0x200000u
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

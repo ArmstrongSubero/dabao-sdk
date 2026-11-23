@@ -41,9 +41,14 @@ void spi_set_mode(uint instance, uint8_t cpol, uint8_t cpha);
 /*
  * Write len bytes over SPI. No data is read back.
  *
- * clkdiv: SPI clock = perclk / (2 * (clkdiv + 1))
- *   clkdiv=4  -> ~10 MHz
- *   clkdiv=49 -> ~1 MHz
+ * clkdiv: SPI clock = perclk / (2 * clkdiv), and clkdiv=0 bypasses the
+ * divider so the SPI clock is perclk itself (udma_clkgen.sv). With
+ * perclk at 99.8 MHz:
+ *   clkdiv=5  -> 9.98 MHz
+ *   clkdiv=10 -> 4.99 MHz
+ *   clkdiv=50 -> 998 kHz
+ * For a device with a maximum clock F, use clkdiv = perclk / (2 * F),
+ * rounded up.
  */
 void spi_write_blocking(uint instance, const uint8_t *data, uint32_t len, uint8_t clkdiv);
 

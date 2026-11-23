@@ -82,8 +82,10 @@ int i2c_async_status(uint instance);
 /*
  * Maximum payload per transaction. The driver stages data through
  * fixed IFRAM buffers of this size; longer transfers must be split.
+ * 4096 holds a full frame for a 128 x 128 monochrome display plus its
+ * control byte.
  */
-#define I2C_MAX_XFER        256
+#define I2C_MAX_XFER        4096
 
 /* Return codes for the blocking transfer functions. */
 #define I2C_OK               0
