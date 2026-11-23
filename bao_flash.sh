@@ -241,7 +241,7 @@ do_build() {
     mkdir -p build
 
     echo "[0/4] Checking $EXAMPLE for forbidden addresses ..."
-    python3 tools/audit_addresses.py "$EXAMPLE_DIR" || exit 1
+    python3 -m dabao_sdk_tools.audit_addresses "$EXAMPLE_DIR" || exit 1
 
     echo "[1/4] Assembling startup ..."
     ${CROSS}gcc $ARCH -g -c -o build/crt0.o src/runtime/crt0.S
@@ -311,7 +311,7 @@ do_build() {
 
     ${CROSS}objcopy -O binary "build/${EXAMPLE}.elf" "build/${EXAMPLE}.bin"
 
-    python3 tools/sign_and_uf2.py "build/${EXAMPLE}.bin" "build/${EXAMPLE}.uf2" 0x60060000 0xa7d76373
+    python3 -m dabao_sdk_tools.sign_and_uf2 "build/${EXAMPLE}.bin" "build/${EXAMPLE}.uf2" 0x60060000 0xa7d76373
 
     echo ""
     ${CROSS}size "build/${EXAMPLE}.elf"
@@ -369,7 +369,7 @@ do_build_mmu() {
     mkdir -p build
 
     echo "[0/4] Checking $EXAMPLE for forbidden addresses ..."
-    python3 tools/audit_addresses.py "$EXAMPLE_DIR" || exit 1
+    python3 -m dabao_sdk_tools.audit_addresses "$EXAMPLE_DIR" || exit 1
 
     echo "[1/4] Assembling startup and service stubs ..."
     ${CROSS}gcc $ARCH -g -DBAO_MMU=1 -c -o build/mmu_crt0.o src/runtime/crt0_mmu.S
@@ -428,7 +428,7 @@ do_build_mmu() {
 
     ${CROSS}objcopy -O binary "build/${EXAMPLE}.elf" "build/${EXAMPLE}.bin"
 
-    python3 tools/sign_and_uf2.py "build/${EXAMPLE}.bin" "build/${EXAMPLE}.uf2" 0x60060000 0xa7d76373
+    python3 -m dabao_sdk_tools.sign_and_uf2 "build/${EXAMPLE}.bin" "build/${EXAMPLE}.uf2" 0x60060000 0xa7d76373
 
     echo ""
     ${CROSS}size "build/${EXAMPLE}.elf"
@@ -458,7 +458,7 @@ do_flash() {
         case "$1" in
             --persistent)
                 echo "Flashing $UF2 via $PORT (persistent mode) ..."
-                python3 tools/serial_flash.py --persistent "$PORT" "$UF2"
+                python3 -m dabao_sdk_tools.serial_flash --persistent "$PORT" "$UF2"
                 return
                 ;;
             --icsp)
@@ -469,12 +469,12 @@ do_flash() {
                 DTR_PORT="$2"
                 shift
                 echo "Flashing $UF2 via $DTR_PORT + $PORT (ICSP mode) ..."
-                python3 tools/serial_flash.py --icsp "$DTR_PORT" "$PORT" "$UF2"
+                python3 -m dabao_sdk_tools.serial_flash --icsp "$DTR_PORT" "$PORT" "$UF2"
                 return
                 ;;
             --icsp-single)
                 echo "Flashing $UF2 via $PORT (single-port ICSP) ..."
-                python3 tools/serial_flash.py --icsp-single "$PORT" "$UF2"
+                python3 -m dabao_sdk_tools.serial_flash --icsp-single "$PORT" "$UF2"
                 return
                 ;;
             *)
@@ -487,7 +487,7 @@ do_flash() {
 
     # Default: normal flash
     echo "Flashing $UF2 via $PORT ..."
-    python3 tools/serial_flash.py "$PORT" "$UF2"
+    python3 -m dabao_sdk_tools.serial_flash "$PORT" "$UF2"
 }
 
 do_verify() {

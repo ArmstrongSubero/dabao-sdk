@@ -1,6 +1,6 @@
 #!/bin/bash
-# Build tools/emu/fw/test.elf against this SDK tree (GitHub layout).
-# usage: tools/emu/build_fw.sh [path to riscv-none-elf- prefix]
+# Build dabao_sdk_tools/emu/fw/test.elf against this SDK tree (GitHub layout).
+# usage: dabao_sdk_tools/emu/build_fw.sh [path to riscv-none-elf- prefix]
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"

@@ -12,20 +12,20 @@ requires-python = ">=3.12"
 dependencies = [
     "pyserial",
     "pure25519",
+    "reportlab",
 ]
 
 [project.urls]
 Homepage = "https://github.com/ArmstrongSubero/dabao-sdk"
 
 [project.scripts]
-dabao-audit-addresses = "audit_addresses:main"
-dabao-serial-flash = "serial_flash:main"
-dabao-sign-and-uf2 = "sign_and_uf2:main"
+dabao-audit-addresses = "dabao_sdk_tools.audit_addresses:main"
+dabao-serial-flash = "dabao_sdk_tools.serial_flash:main"
+dabao-sign-and-uf2 = "dabao_sdk_tools.sign_and_uf2:main"
+dabao-board-vs-emu = "dabao_sdk_tools.board_vs_emu:main"
 
 [tool.pdm.build]
-package-dir = "tools"
+package-dir = "."
 includes = [
-    "tools/audit_addresses.py",
-    "tools/serial_flash.py",
-    "tools/sign_and_uf2.py",
+    "dabao_sdk_tools",
 ]

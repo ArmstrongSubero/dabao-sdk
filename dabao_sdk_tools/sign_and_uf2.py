@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-sign_and_uf2.py v3 - Correct Ed25519ph signing for Baochip-1x
+dabao_sdk_tools.sign_and_uf2 v3 - Correct Ed25519ph signing for Baochip-1x
 
 Requirements: pip install pure25519
 
