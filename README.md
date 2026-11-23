@@ -267,7 +267,9 @@ Then: `bao_flash build your_program`
 
 On Windows, `set BAO_MMU=1` before `bao_flash build` or `bao_flash run` does the same, and `set BAO_MMU=` goes back to normal builds.
 
-In a sandbox build a stray store from your code cannot reach the boot chain. The page table maps only the program image (read and execute), runtime storage (read only), your stacks and data, the IFRAM DMA buffers and the peripheral pages the SDK drivers use. boot0, boot1, the one way counters, the security region, the IFR and every register block from 0x40000000 to 0x4007FFFF (RRC, SCE, CGU, WDT, ATIMER, EVC, AON, RTC) are unmapped, so touching them ends in a page fault. The main stack has an unmapped guard page below it, so a runaway recursion ends in a fault as well. A fault prints the cause, the faulting address and the pc on the console and halts:
+In a sandbox build a stray store from your code cannot reach the boot chain. The page table maps only the program image (read and execute), runtime storage (read only), your stacks and data, the IFRAM DMA buffers and the peripheral pages the SDK drivers use. boot0, boot1, the one way counters, the security region, the IFR and every register block from 0x40000000 to 0x4007FFFF (RRC, SCE, CGU, WDT, ATIMER, EVC, AON, RTC) are unmapped, so touching them ends in a page fault. 
+
+The main stack has an unmapped guard page below it, so a runaway recursion ends in a fault as well. A fault prints the cause, the faulting address and the pc on the console and halts:
 
 ```
 MMU: store page fault at 0x61000fd0, pc 0x60065912, supervisor mode
@@ -275,9 +277,14 @@ MMU: below the main stack, stack overflow
 MMU: halted
 ```
 
-The SHA, AES, TRNG, PKE, ALU, RRAM write, WDT and RTC drivers, bio_init's clock setting and bao_software_reset still work from your code: they run in machine mode behind an ecall, unchanged, with every pointer you pass them checked against your page table and lengths capped at 2 MB. rram_write and friends reach runtime storage only (0x60160000 up); a write into the program region faults. Interrupts and the irq, timer and event calls work as before, delivered to supervisor mode.
+The SHA, AES, TRNG, PKE, ALU, RRAM write, WDT and RTC drivers, bio_init's clock setting and bao_software_reset still work from your code: they run in machine mode behind an ecall, unchanged, with every pointer you pass them checked against your page table and lengths capped at 2 MB. rram_write and friends reach runtime storage only (0x60160000 up); a write into the program region faults. 
 
-What a sandbox build cannot do: read or write the machine mode CSRs (mstatus, mie, mcycle, the 0xBC0 and 0xFC0 arrays), reach the mailbox, the MDMA or any register block the SDK drivers do not use, use the PKE helper calls that take SCE register pointers (pke_run, pke_seg_*, pke_wait_fr, pke_sce_prepare, pke_bn_*), or use USB CDC: the sandbox build does not compile TinyUSB, so `usb_cdc` builds as a normal program only. Use `sstatus`, `sie`, the cycle CSR and the SDK calls instead. Every sandbox image carries all the machine mode drivers (about 23 KB more than a plain build), and SRAM loses its bottom 132 KB to machine mode data and stack, the page tables, the stacks and their guard pages. `src/mmu/bao_mmu.c` has the details.
+Interrupts and the irq, timer and event calls work as before, delivered to supervisor mode.
+
+What a sandbox build cannot do are read or write the machine mode CSRs (mstatus, mie, mcycle, the 0xBC0 and 0xFC0 arrays), reach the mailbox, the MDMA or any register block the SDK drivers do not use, use the PKE helper calls that take SCE register pointers (pke_run, pke_seg_*, pke_wait_fr, pke_sce_prepare, pke_bn_*).
+
+*NOTE ON USB CDC: the sandbox build does not compile TinyUSB, so `usb_cdc` builds as a normal program only. Use `sstatus`, `sie`, the cycle CSR and the SDK calls instead. Every sandbox image carries all the machine mode drivers (about 23 KB more than a plain build), and SRAM loses its bottom 132 KB to machine mode data and stack, the page tables, the stacks and their guard pages. `src/mmu/bao_mmu.c` has the details.
+
 
 ## Clock Tree
 
