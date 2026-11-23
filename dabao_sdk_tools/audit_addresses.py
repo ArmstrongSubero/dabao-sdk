@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-audit_addresses.py: refuse source code that names a board killing address
+dabao_sdk_tools.audit_addresses: refuse source code that names a board killing address
 
 Copyright (c) 2026 Armstrong Subero
 SPDX-License-Identifier: Apache-2.0

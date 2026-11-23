@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-serial_flash.py: flash a signed UF2 to the Dabao through the boot1 serial REPL
+dabao_sdk_tools.serial_flash: flash a signed UF2 to the Dabao through the boot1 serial REPL
 
 Copyright (c) 2026 Armstrong Subero
 SPDX-License-Identifier: Apache-2.0

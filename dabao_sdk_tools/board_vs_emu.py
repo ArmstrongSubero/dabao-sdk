@@ -6,9 +6,9 @@ Copyright (c) 2026 Armstrong Subero
 SPDX-License-Identifier: Apache-2.0
 
 Usage:
-  python tools/board_vs_emu.py --port COM27 --console COM5 bio_isa bio_div aes_modes
-  python tools/board_vs_emu.py --port COM27 --console COM5 --mmu mmu_stack mmu_gap
-  python tools/board_vs_emu.py --emu-only hello_uart blink:3000
+  dabao-board-vs-emu --port COM27 --console COM5 bio_isa bio_div aes_modes
+  dabao-board-vs-emu --port COM27 --console COM5 --mmu mmu_stack mmu_gap
+  dabao-board-vs-emu --emu-only hello_uart blink:3000
 
   --port      boot1 USB port used for flashing
   --console   USB serial adapter on PB14 (TX) and PB13 (RX)
@@ -31,7 +31,8 @@ import sys
 import threading
 import time
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = PACKAGE_ROOT
 WIN = os.name == "nt"
 
 
@@ -102,7 +103,7 @@ def flash(port, name):
     uf2 = os.path.join(ROOT, "build", name + ".uf2")
     if not os.path.exists(uf2):
         return False, "no " + uf2
-    r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "serial_flash.py"), port, uf2],
+    r = subprocess.run([sys.executable, "-m", "dabao_sdk_tools.serial_flash", port, uf2],
                        cwd=ROOT, capture_output=True, text=True)
     return r.returncode == 0, r.stdout + r.stderr
 
@@ -220,6 +221,8 @@ def report(path, results, args):
 
 
 def main():
+    global ROOT
+
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument("examples", nargs="+")
     ap.add_argument("--port")
@@ -233,6 +236,11 @@ def main():
 
     if not args.emu_only and not (args.port and args.console):
         sys.exit("give --port and --console, or use --emu-only")
+    ROOT = next((root for root in (os.getcwd(), PACKAGE_ROOT)
+                 if os.path.isfile(os.path.join(root, "bao_flash.sh"))
+                 or os.path.isfile(os.path.join(root, "bao_flash.bat"))), None)
+    if ROOT is None:
+        sys.exit("Run dabao-board-vs-emu from a Dabao SDK checkout")
     emu = find_emu(args.emu)
     out = os.path.join(ROOT, "compare_" + datetime.datetime.now().strftime("%Y%m%d_%H%M"))
     os.makedirs(out, exist_ok=True)
